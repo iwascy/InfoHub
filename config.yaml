@@ -1,0 +1,43 @@
+server:
+  port: 8080
+  auth_token: ""
+  read_timeout_seconds: 10
+  write_timeout_seconds: 10
+  shutdown_timeout_seconds: 10
+
+collectors:
+  claude_relay:
+    enabled: false
+    cron: "*/10 * * * *"
+    base_url: "https://your-relay.example.com"
+    endpoint: "/api/v1/summary"
+    api_key: ""
+    timeout_seconds: 15
+    headers: {}
+
+  sub2api:
+    enabled: false
+    cron: "*/10 * * * *"
+    base_url: "https://your-sub2api.example.com"
+    endpoint: "/api/v1/summary"
+    api_key: ""
+    timeout_seconds: 15
+    headers: {}
+
+  feishu:
+    enabled: false
+    cron: "*/30 * * * *"
+    base_url: "https://open.feishu.cn"
+    endpoint: ""
+    app_id: ""
+    app_secret: ""
+    project_key: ""
+    timeout_seconds: 15
+    headers: {}
+
+store:
+  type: "memory"
+  sqlite_path: "./data/infohub.db"
+
+log:
+  level: "info"

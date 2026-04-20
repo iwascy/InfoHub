@@ -1,0 +1,25 @@
+package api
+
+import (
+	"log/slog"
+	"net/http"
+
+	"infohub/internal/collector"
+	"infohub/internal/scheduler"
+	"infohub/internal/store"
+)
+
+func NewRouter(dataStore store.Store, registry *collector.Registry, scheduler *scheduler.Scheduler, logger *slog.Logger, authToken string) http.Handler {
+	handler := NewHandler(dataStore, registry, scheduler)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/v1/summary", handler.Summary)
+	mux.HandleFunc("GET /api/v1/source/{name}", handler.Source)
+	mux.HandleFunc("GET /api/v1/health", handler.Health)
+	mux.HandleFunc("POST /api/v1/collect/{name}", handler.Collect)
+
+	var root http.Handler = mux
+	root = withAuth(root, authToken)
+	root = withLogging(root, logger)
+	return root
+}
