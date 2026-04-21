@@ -9,7 +9,7 @@ import (
 	"infohub/internal/store"
 )
 
-func NewRouter(dataStore store.Store, registry *collector.Registry, scheduler *scheduler.Scheduler, logger *slog.Logger, authToken string) http.Handler {
+func NewRouter(dataStore store.Store, registry *collector.Registry, scheduler *scheduler.Scheduler, logger *slog.Logger, authToken string, dashboardToken string) http.Handler {
 	handler := NewHandler(dataStore, registry, scheduler)
 
 	mux := http.NewServeMux()
@@ -17,6 +17,7 @@ func NewRouter(dataStore store.Store, registry *collector.Registry, scheduler *s
 	mux.HandleFunc("GET /api/v1/source/{name}", handler.Source)
 	mux.HandleFunc("GET /api/v1/health", handler.Health)
 	mux.HandleFunc("POST /api/v1/collect/{name}", handler.Collect)
+	mux.Handle("GET /dashboard/eink", withDashboardAccess(http.HandlerFunc(handler.EInkDashboard), authToken, dashboardToken))
 
 	var root http.Handler = mux
 	root = withAuth(root, authToken)

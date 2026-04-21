@@ -3,8 +3,11 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"infohub/internal/collector"
@@ -78,5 +81,198 @@ func TestHealthHandlerIncludesUnknownRegisteredCollector(t *testing.T) {
 	}
 	if payload.Collectors["feishu"].Status != "unknown" {
 		t.Fatalf("unexpected collector status: %s", payload.Collectors["feishu"].Status)
+	}
+}
+
+func TestEInkDashboardRendersCustomLayout(t *testing.T) {
+	dataStore := store.NewMemoryStore()
+	mustSaveSnapshot(t, dataStore, "claude_relay", []model.DataItem{
+		{
+			Source:    "claude_relay",
+			Category:  "token_usage",
+			Title:     "今日 Token 用量",
+			Value:     "1058870",
+			FetchedAt: 1776766339,
+			Extra: map[string]any{
+				"daily_cost":       1.62,
+				"daily_requests":   14,
+				"enabled_accounts": 1,
+			},
+		},
+		{
+			Source:    "claude_relay",
+			Category:  "quota",
+			Title:     "账号 cycyzg 5H 额度",
+			Value:     "71%",
+			FetchedAt: 1776766339,
+			Extra: map[string]any{
+				"remaining_percent": 71,
+				"window":            "5H",
+				"reset_at":          "2026-04-21T22:00:00+08:00",
+			},
+		},
+		{
+			Source:    "claude_relay",
+			Category:  "quota",
+			Title:     "账号 cycyzg Week 额度",
+			Value:     "77%",
+			FetchedAt: 1776766339,
+			Extra: map[string]any{
+				"remaining_percent": 77,
+				"window":            "Week",
+				"reset_at":          "2026-04-26T00:00:00+08:00",
+			},
+		},
+	})
+	mustSaveSnapshot(t, dataStore, "sub2api", []model.DataItem{
+		{
+			Source:    "sub2api",
+			Category:  "token_usage",
+			Title:     "今日 Token 用量",
+			Value:     "24854435",
+			FetchedAt: 1776766339,
+			Extra: map[string]any{
+				"daily_cost":       13.55,
+				"daily_requests":   394,
+				"enabled_accounts": 5,
+			},
+		},
+		{
+			Source:    "sub2api",
+			Category:  "quota",
+			Title:     "账号 2 5H 额度",
+			Value:     "77%",
+			FetchedAt: 1776766339,
+			Extra: map[string]any{
+				"remaining_percent": 77,
+				"window":            "5H",
+			},
+		},
+		{
+			Source:    "sub2api",
+			Category:  "quota",
+			Title:     "账号 2 Week 额度",
+			Value:     "93%",
+			FetchedAt: 1776766339,
+			Extra: map[string]any{
+				"remaining_percent": 93,
+				"window":            "Week",
+			},
+		},
+		{
+			Source:    "sub2api",
+			Category:  "quota",
+			Title:     "账号 admin10010 5H 额度",
+			Value:     "56%",
+			FetchedAt: 1776766339,
+			Extra: map[string]any{
+				"remaining_percent": 56,
+				"window":            "5H",
+			},
+		},
+		{
+			Source:    "sub2api",
+			Category:  "quota",
+			Title:     "账号 admin10010 Week 额度",
+			Value:     "92%",
+			FetchedAt: 1776766339,
+			Extra: map[string]any{
+				"remaining_percent": 92,
+				"window":            "Week",
+			},
+		},
+		{
+			Source:    "sub2api",
+			Category:  "quota",
+			Title:     "账号 kr2vv1nh@test1.susususu.fun 5H 额度",
+			Value:     "100%",
+			FetchedAt: 1776766339,
+			Extra: map[string]any{
+				"remaining_percent": 100,
+				"window":            "5H",
+			},
+		},
+		{
+			Source:    "sub2api",
+			Category:  "quota",
+			Title:     "账号 kr2vv1nh@test1.susususu.fun Week 额度",
+			Value:     "0%",
+			FetchedAt: 1776766339,
+			Extra: map[string]any{
+				"remaining_percent": 0,
+				"window":            "Week",
+			},
+		},
+	})
+
+	handler := NewHandler(dataStore, collector.NewRegistry(), nil)
+	req := httptest.NewRequest(http.MethodGet, "/dashboard/eink?refresh=600", nil)
+	rec := httptest.NewRecorder()
+	handler.EInkDashboard(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("unexpected status code: %d", rec.Code)
+	}
+
+	body := rec.Body.String()
+	for _, expected := range []string{
+		"AI 额度监控面板",
+		"Claude Relay 今日概览",
+		"Sub2API 账号额度",
+		"5H 消耗",
+		"Week 消耗",
+		"25,913,305",
+		"告警 1",
+		"kr2vv1nh@test1.susususu.fun：Week 余量 0%",
+		"admin10010：5H 余量仅 56%",
+		"Week 耗尽",
+	} {
+		if !strings.Contains(body, expected) {
+			t.Fatalf("dashboard body missing %q", expected)
+		}
+	}
+}
+
+func TestDashboardRouteUsesDedicatedToken(t *testing.T) {
+	dataStore := store.NewMemoryStore()
+	registry := collector.NewRegistry()
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	router := NewRouter(dataStore, registry, nil, logger, "api-token", "view-token")
+
+	t.Run("rejects missing dashboard token", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/dashboard/eink", nil)
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("unexpected status code: %d", rec.Code)
+		}
+	})
+
+	t.Run("accepts dedicated dashboard token", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/dashboard/eink?token=view-token", nil)
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("unexpected status code: %d body=%s", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("keeps api auth unchanged", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/summary?token=view-token", nil)
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("unexpected status code: %d", rec.Code)
+		}
+	})
+}
+
+func mustSaveSnapshot(t *testing.T, dataStore store.Store, source string, items []model.DataItem) {
+	t.Helper()
+	if err := dataStore.Save(source, items); err != nil {
+		t.Fatalf("save failed: %v", err)
 	}
 }

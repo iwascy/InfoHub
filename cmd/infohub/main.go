@@ -56,7 +56,7 @@ func main() {
 	taskScheduler.RunAllNow(initialCtx)
 	cancelInitial()
 
-	handler := api.NewRouter(dataStore, registry, taskScheduler, logger, cfg.Server.AuthToken)
+	handler := api.NewRouter(dataStore, registry, taskScheduler, logger, cfg.Server.AuthToken, cfg.Server.DashboardToken)
 	server := &http.Server{
 		Addr:              cfg.Server.Address(),
 		Handler:           handler,

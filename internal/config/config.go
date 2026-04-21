@@ -1,9 +1,11 @@
 package config
 
 import (
+	"bufio"
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -31,6 +33,7 @@ type Config struct {
 type ServerConfig struct {
 	Port                   int    `yaml:"port"`
 	AuthToken              string `yaml:"auth_token"`
+	DashboardToken         string `yaml:"dashboard_token"`
 	ReadTimeoutSeconds     int    `yaml:"read_timeout_seconds"`
 	WriteTimeoutSeconds    int    `yaml:"write_timeout_seconds"`
 	ShutdownTimeoutSeconds int    `yaml:"shutdown_timeout_seconds"`
@@ -45,11 +48,31 @@ type CollectorsConfig struct {
 type HTTPCollectorConfig struct {
 	Enabled        bool              `yaml:"enabled"`
 	Cron           string            `yaml:"cron"`
+	Service        HTTPServiceConfig `yaml:"service"`
+	Auth           HTTPAuthConfig    `yaml:"auth"`
 	BaseURL        string            `yaml:"base_url"`
 	Endpoint       string            `yaml:"endpoint"`
 	APIKey         string            `yaml:"api_key"`
 	TimeoutSeconds int               `yaml:"timeout_seconds"`
 	Headers        map[string]string `yaml:"headers"`
+}
+
+type HTTPServiceConfig struct {
+	BaseURL   string            `yaml:"base_url"`
+	Headers   map[string]string `yaml:"headers"`
+	Endpoints map[string]string `yaml:"endpoints"`
+}
+
+type HTTPAuthConfig struct {
+	Type          string            `yaml:"type"`
+	HeaderName    string            `yaml:"header_name"`
+	TokenPrefix   string            `yaml:"token_prefix"`
+	Token         string            `yaml:"token"`
+	Headers       map[string]string `yaml:"headers"`
+	LoginEndpoint string            `yaml:"login_endpoint"`
+	Method        string            `yaml:"method"`
+	TokenPath     string            `yaml:"token_path"`
+	Credentials   map[string]string `yaml:"credentials"`
 }
 
 type FeishuCollectorConfig struct {
@@ -84,11 +107,16 @@ type ScheduleConfig map[string]CollectorSchedule
 func Load(path string) (Config, error) {
 	var cfg Config
 
+	if err := loadDotEnv(path); err != nil {
+		return cfg, err
+	}
+
 	content, err := os.ReadFile(path)
 	if err != nil {
 		return cfg, fmt.Errorf("read config file: %w", err)
 	}
-	if err := yaml.Unmarshal(content, &cfg); err != nil {
+	expanded := os.ExpandEnv(string(content))
+	if err := yaml.Unmarshal([]byte(expanded), &cfg); err != nil {
 		return cfg, fmt.Errorf("parse config yaml: %w", err)
 	}
 
@@ -193,6 +221,60 @@ func (c *HTTPCollectorConfig) applyDefaults() {
 	if c.Headers == nil {
 		c.Headers = map[string]string{}
 	}
+
+	if c.Service.BaseURL == "" {
+		c.Service.BaseURL = strings.TrimSpace(c.BaseURL)
+	}
+	if c.Service.Headers == nil {
+		if len(c.Headers) > 0 {
+			c.Service.Headers = cloneStringMap(c.Headers)
+		} else {
+			c.Service.Headers = map[string]string{}
+		}
+	}
+	if c.Service.Endpoints == nil {
+		c.Service.Endpoints = map[string]string{}
+	}
+	if len(c.Service.Endpoints) == 0 && strings.TrimSpace(c.Endpoint) != "" {
+		c.Service.Endpoints["default"] = strings.TrimSpace(c.Endpoint)
+	}
+
+	if c.Auth.Headers == nil {
+		c.Auth.Headers = map[string]string{}
+	}
+	if c.Auth.Credentials == nil {
+		c.Auth.Credentials = map[string]string{}
+	}
+	if c.Auth.Token == "" && strings.TrimSpace(c.APIKey) != "" {
+		c.Auth.Token = strings.TrimSpace(c.APIKey)
+	}
+
+	switch strings.ToLower(strings.TrimSpace(c.Auth.Type)) {
+	case "":
+		if strings.TrimSpace(c.Auth.Token) != "" {
+			c.Auth.Type = "bearer"
+		} else {
+			c.Auth.Type = "none"
+		}
+	case "none", "bearer", "login_json":
+	default:
+		c.Auth.Type = strings.TrimSpace(c.Auth.Type)
+	}
+
+	if c.Auth.Type != "none" && c.Auth.HeaderName == "" {
+		c.Auth.HeaderName = "Authorization"
+	}
+	if c.Auth.Type != "none" && c.Auth.TokenPrefix == "" {
+		c.Auth.TokenPrefix = "Bearer "
+	}
+	if strings.EqualFold(c.Auth.Type, "login_json") {
+		if c.Auth.Method == "" {
+			c.Auth.Method = "POST"
+		}
+		if c.Auth.TokenPath == "" {
+			c.Auth.TokenPath = "token"
+		}
+	}
 }
 
 func (c *FeishuCollectorConfig) applyDefaults() {
@@ -218,4 +300,72 @@ func ParseLogLevel(level string) slog.Level {
 	default:
 		return slog.LevelInfo
 	}
+}
+
+func cloneStringMap(source map[string]string) map[string]string {
+	if len(source) == 0 {
+		return map[string]string{}
+	}
+
+	cloned := make(map[string]string, len(source))
+	for key, value := range source {
+		cloned[key] = value
+	}
+	return cloned
+}
+
+func loadDotEnv(configPath string) error {
+	dotEnvPath := filepath.Join(filepath.Dir(configPath), ".env")
+	content, err := os.ReadFile(dotEnvPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("read .env file: %w", err)
+	}
+
+	scanner := bufio.NewScanner(strings.NewReader(string(content)))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		if strings.HasPrefix(line, "export ") {
+			line = strings.TrimSpace(strings.TrimPrefix(line, "export "))
+		}
+
+		key, value, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+
+		key = strings.TrimSpace(key)
+		if key == "" || os.Getenv(key) != "" {
+			continue
+		}
+
+		value = strings.TrimSpace(value)
+		if unquoted, ok := unquoteEnvValue(value); ok {
+			value = unquoted
+		}
+		if err := os.Setenv(key, value); err != nil {
+			return fmt.Errorf("set env %s: %w", key, err)
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("scan .env file: %w", err)
+	}
+
+	return nil
+}
+
+func unquoteEnvValue(value string) (string, bool) {
+	if len(value) < 2 {
+		return value, false
+	}
+	if (strings.HasPrefix(value, "\"") && strings.HasSuffix(value, "\"")) ||
+		(strings.HasPrefix(value, "'") && strings.HasSuffix(value, "'")) {
+		return value[1 : len(value)-1], true
+	}
+	return value, false
 }

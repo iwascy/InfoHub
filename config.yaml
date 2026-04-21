@@ -1,28 +1,55 @@
 server:
-  port: 8080
-  auth_token: ""
+  port: ${INFOHUB_PORT}
+  auth_token: "${INFOHUB_AUTH_TOKEN}"
+  dashboard_token: "${INFOHUB_DASHBOARD_TOKEN}"
   read_timeout_seconds: 10
   write_timeout_seconds: 10
   shutdown_timeout_seconds: 10
 
 collectors:
   claude_relay:
-    enabled: false
+    enabled: ${CLAUDE_RELAY_ENABLED}
     cron: "*/10 * * * *"
-    base_url: "https://your-relay.example.com"
-    endpoint: "/api/v1/summary"
-    api_key: ""
     timeout_seconds: 15
-    headers: {}
+    service:
+      base_url: "${CLAUDE_RELAY_BASE_URL}"
+      headers: {}
+      endpoints:
+        accounts: "/admin/claude-accounts"
+        usage: "/admin/claude-accounts/usage"
+    auth:
+      type: "login_json"
+      header_name: "Authorization"
+      token_prefix: "Bearer"
+      login_endpoint: "/web/auth/login"
+      method: "POST"
+      token_path: "token"
+      headers: {}
+      credentials:
+        username: "${CLAUDE_RELAY_USERNAME}"
+        password: "${CLAUDE_RELAY_PASSWORD}"
 
   sub2api:
-    enabled: false
+    enabled: ${SUB2API_ENABLED}
     cron: "*/10 * * * *"
-    base_url: "https://your-sub2api.example.com"
-    endpoint: "/api/v1/summary"
-    api_key: ""
     timeout_seconds: 15
-    headers: {}
+    service:
+      base_url: "${SUB2API_BASE_URL}"
+      headers: {}
+      endpoints:
+        accounts: "/api/v1/admin/accounts"
+        today_stats: "/api/v1/admin/accounts/today-stats/batch"
+    auth:
+      type: "login_json"
+      header_name: "Authorization"
+      token_prefix: "Bearer"
+      login_endpoint: "/api/v1/auth/login"
+      method: "POST"
+      token_path: "data.access_token"
+      headers: {}
+      credentials:
+        email: "${SUB2API_ADMIN_EMAIL}"
+        password: "${SUB2API_ADMIN_PASSWORD}"
 
   feishu:
     enabled: false
@@ -36,8 +63,8 @@ collectors:
     headers: {}
 
 store:
-  type: "memory"
-  sqlite_path: "./data/infohub.db"
+  type: "${INFOHUB_STORE_TYPE}"
+  sqlite_path: "${INFOHUB_SQLITE_PATH}"
 
 log:
-  level: "info"
+  level: "${INFOHUB_LOG_LEVEL}"

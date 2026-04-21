@@ -17,14 +17,22 @@ type FeishuCollector struct {
 }
 
 func NewFeishuCollector(cfg config.FeishuCollectorConfig, logger *slog.Logger) *FeishuCollector {
+	httpCfg := config.HTTPCollectorConfig{
+		TimeoutSeconds: cfg.TimeoutSeconds,
+		Service: config.HTTPServiceConfig{
+			BaseURL: cfg.BaseURL,
+			Headers: cfg.Headers,
+			Endpoints: map[string]string{
+				defaultEndpointKey: cfg.Endpoint,
+			},
+		},
+	}
+
 	return &FeishuCollector{
 		http: httpJSONCollector{
-			name:     "feishu",
-			client:   newHTTPClient(cfg.Timeout()),
-			logger:   logger,
-			baseURL:  cfg.BaseURL,
-			endpoint: cfg.Endpoint,
-			headers:  cfg.Headers,
+			name:        "feishu",
+			service:     newServiceJSONClient("feishu", httpCfg, logger),
+			endpointKey: defaultEndpointKey,
 		},
 		projectKey: cfg.ProjectKey,
 		appID:      cfg.AppID,
@@ -37,8 +45,8 @@ func (c *FeishuCollector) Name() string {
 }
 
 func (c *FeishuCollector) Collect(ctx context.Context) ([]model.DataItem, error) {
-	if c.http.endpoint == "" {
-		return nil, fmt.Errorf("feishu endpoint is empty; configure collectors.feishu.endpoint or add a proxy endpoint")
+	if !c.http.service.hasEndpoint(c.http.endpointKey) {
+		return nil, fmt.Errorf("feishu endpoint is empty; configure collectors.feishu.service.endpoints.default or collectors.feishu.endpoint")
 	}
 
 	payload, err := c.http.fetch(ctx)

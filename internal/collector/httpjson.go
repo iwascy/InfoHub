@@ -1,6 +1,7 @@
 package collector
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -12,78 +13,267 @@ import (
 	"strings"
 	"time"
 
+	"infohub/internal/config"
 	"infohub/internal/model"
 )
 
+const defaultEndpointKey = "default"
+
 type httpJSONCollector struct {
-	name     string
-	client   *http.Client
-	logger   *slog.Logger
-	baseURL  string
-	endpoint string
-	headers  map[string]string
+	name        string
+	service     *serviceJSONClient
+	endpointKey string
 }
 
 func (c *httpJSONCollector) fetch(ctx context.Context) (any, error) {
-	if strings.TrimSpace(c.baseURL) == "" {
-		return nil, fmt.Errorf("%s base_url is empty", c.name)
-	}
-	if strings.TrimSpace(c.endpoint) == "" {
-		return nil, fmt.Errorf("%s endpoint is empty", c.name)
+	if c.service == nil {
+		return nil, fmt.Errorf("%s service client is nil", c.name)
 	}
 
-	targetURL, err := joinURL(c.baseURL, c.endpoint)
+	session, err := c.service.newSession(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, targetURL, nil)
+	endpointKey := c.endpointKey
+	if endpointKey == "" {
+		endpointKey = defaultEndpointKey
+	}
+
+	return session.fetchJSON(ctx, http.MethodGet, endpointKey, nil, nil)
+}
+
+type serviceJSONClient struct {
+	name      string
+	client    *http.Client
+	logger    *slog.Logger
+	baseURL   string
+	headers   map[string]string
+	endpoints map[string]string
+	auth      config.HTTPAuthConfig
+}
+
+type serviceSession struct {
+	name      string
+	client    *http.Client
+	logger    *slog.Logger
+	baseURL   string
+	headers   map[string]string
+	endpoints map[string]string
+}
+
+func newServiceJSONClient(name string, cfg config.HTTPCollectorConfig, logger *slog.Logger) *serviceJSONClient {
+	return &serviceJSONClient{
+		name:      name,
+		client:    newHTTPClient(cfg.Timeout()),
+		logger:    logger,
+		baseURL:   strings.TrimSpace(cfg.Service.BaseURL),
+		headers:   cloneHeaders(cfg.Service.Headers),
+		endpoints: cloneHeaders(cfg.Service.Endpoints),
+		auth:      cfg.Auth,
+	}
+}
+
+func (c *serviceJSONClient) hasEndpoint(key string) bool {
+	if c == nil {
+		return false
+	}
+
+	endpointKey := strings.TrimSpace(key)
+	if endpointKey == "" {
+		endpointKey = defaultEndpointKey
+	}
+
+	endpoint, ok := c.endpoints[endpointKey]
+	return ok && strings.TrimSpace(endpoint) != ""
+}
+
+func (c *serviceJSONClient) newSession(ctx context.Context) (*serviceSession, error) {
+	if c == nil {
+		return nil, fmt.Errorf("service client is nil")
+	}
+	if strings.TrimSpace(c.baseURL) == "" {
+		return nil, fmt.Errorf("%s service.base_url is empty", c.name)
+	}
+
+	session := &serviceSession{
+		name:      c.name,
+		client:    c.client,
+		logger:    c.logger,
+		baseURL:   c.baseURL,
+		headers:   cloneHeaders(c.headers),
+		endpoints: cloneHeaders(c.endpoints),
+	}
+
+	if err := session.applyAuth(ctx, c.auth); err != nil {
+		return nil, err
+	}
+
+	return session, nil
+}
+
+func (s *serviceSession) fetchJSON(ctx context.Context, method, endpointKey string, query url.Values, body any) (any, error) {
+	endpoint, err := s.resolveEndpoint(endpointKey)
+	if err != nil {
+		return nil, err
+	}
+
+	targetURL, err := joinURL(s.baseURL, endpoint)
+	if err != nil {
+		return nil, err
+	}
+	if len(query) > 0 {
+		parsedURL, err := url.Parse(targetURL)
+		if err != nil {
+			return nil, fmt.Errorf("parse target url: %w", err)
+		}
+		values := parsedURL.Query()
+		for key, entries := range query {
+			for _, value := range entries {
+				values.Add(key, value)
+			}
+		}
+		parsedURL.RawQuery = values.Encode()
+		targetURL = parsedURL.String()
+	}
+
+	reader, contentType, err := jsonRequestBody(body)
+	if err != nil {
+		return nil, fmt.Errorf("encode request body: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, strings.ToUpper(strings.TrimSpace(method)), targetURL, reader)
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 	req.Header.Set("Accept", "application/json")
-	for key, value := range c.headers {
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
+	}
+	for key, value := range s.headers {
 		if strings.TrimSpace(key) == "" || strings.TrimSpace(value) == "" {
 			continue
 		}
 		req.Header.Set(key, value)
 	}
 
-	resp, err := c.client.Do(req)
+	resp, err := s.client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("request upstream: %w", err)
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	payload, err := readJSONResponse(resp)
 	if err != nil {
-		return nil, fmt.Errorf("read upstream response: %w", err)
+		return nil, err
 	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("upstream status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
-	}
-
-	var payload any
-	if err := json.Unmarshal(body, &payload); err != nil {
-		return nil, fmt.Errorf("decode upstream response: %w", err)
-	}
-
 	return payload, nil
+}
+
+func (s *serviceSession) resolveEndpoint(endpointKey string) (string, error) {
+	key := strings.TrimSpace(endpointKey)
+	if key == "" {
+		key = defaultEndpointKey
+	}
+
+	endpoint, ok := s.endpoints[key]
+	if !ok || strings.TrimSpace(endpoint) == "" {
+		return "", fmt.Errorf("%s endpoint %q is empty", s.name, key)
+	}
+	return endpoint, nil
+}
+
+func (s *serviceSession) applyAuth(ctx context.Context, auth config.HTTPAuthConfig) error {
+	switch strings.ToLower(strings.TrimSpace(auth.Type)) {
+	case "", "none":
+		return nil
+	case "bearer":
+		token := strings.TrimSpace(auth.Token)
+		if token == "" {
+			return fmt.Errorf("%s auth token is empty", s.name)
+		}
+		s.headers[strings.TrimSpace(auth.HeaderName)] = composeTokenValue(auth.TokenPrefix, token)
+		return nil
+	case "login_json":
+		return s.loginJSON(ctx, auth)
+	default:
+		return fmt.Errorf("%s unsupported auth.type %q", s.name, auth.Type)
+	}
+}
+
+func (s *serviceSession) loginJSON(ctx context.Context, auth config.HTTPAuthConfig) error {
+	loginEndpoint := strings.TrimSpace(auth.LoginEndpoint)
+	if loginEndpoint == "" {
+		if endpoint, ok := s.endpoints["login"]; ok {
+			loginEndpoint = endpoint
+		}
+	}
+	if loginEndpoint == "" {
+		return fmt.Errorf("%s auth.login_endpoint is empty", s.name)
+	}
+
+	targetURL, err := joinURL(s.baseURL, loginEndpoint)
+	if err != nil {
+		return err
+	}
+
+	reader, contentType, err := jsonRequestBody(auth.Credentials)
+	if err != nil {
+		return fmt.Errorf("encode auth credentials: %w", err)
+	}
+
+	method := strings.ToUpper(strings.TrimSpace(auth.Method))
+	if method == "" {
+		method = http.MethodPost
+	}
+
+	req, err := http.NewRequestWithContext(ctx, method, targetURL, reader)
+	if err != nil {
+		return fmt.Errorf("create auth request: %w", err)
+	}
+	req.Header.Set("Accept", "application/json")
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
+	}
+	for key, value := range s.headers {
+		if strings.TrimSpace(key) == "" || strings.TrimSpace(value) == "" {
+			continue
+		}
+		req.Header.Set(key, value)
+	}
+	for key, value := range auth.Headers {
+		if strings.TrimSpace(key) == "" || strings.TrimSpace(value) == "" {
+			continue
+		}
+		req.Header.Set(key, value)
+	}
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("request auth endpoint: %w", err)
+	}
+	defer resp.Body.Close()
+
+	payload, err := readJSONResponse(resp)
+	if err != nil {
+		return fmt.Errorf("login auth failed: %w", err)
+	}
+
+	tokenValue, ok := nestedValue(payload, auth.TokenPath)
+	if !ok {
+		return fmt.Errorf("auth token not found at %q", auth.TokenPath)
+	}
+	token := strings.TrimSpace(stringify(tokenValue))
+	if token == "" {
+		return fmt.Errorf("auth token at %q is empty", auth.TokenPath)
+	}
+
+	s.headers[strings.TrimSpace(auth.HeaderName)] = composeTokenValue(auth.TokenPrefix, token)
+	return nil
 }
 
 func newHTTPClient(timeout time.Duration) *http.Client {
 	return &http.Client{Timeout: timeout}
-}
-
-func buildHeaders(apiKey string, extra map[string]string) map[string]string {
-	headers := map[string]string{}
-	for key, value := range extra {
-		headers[key] = value
-	}
-	if strings.TrimSpace(apiKey) != "" {
-		headers["Authorization"] = "Bearer " + strings.TrimSpace(apiKey)
-	}
-	return headers
 }
 
 func joinURL(baseURL, endpoint string) (string, error) {
@@ -202,6 +392,33 @@ func searchValue(payload any, expected map[string]struct{}) (any, bool) {
 	return nil, false
 }
 
+func nestedValue(payload any, path string) (any, bool) {
+	if strings.TrimSpace(path) == "" {
+		return nil, false
+	}
+
+	current := payload
+	for _, part := range strings.Split(path, ".") {
+		key := strings.TrimSpace(part)
+		if key == "" {
+			return nil, false
+		}
+
+		record, ok := current.(map[string]any)
+		if !ok {
+			return nil, false
+		}
+
+		next, ok := record[key]
+		if !ok {
+			return nil, false
+		}
+		current = next
+	}
+
+	return current, true
+}
+
 func normalizeKey(key string) string {
 	replacer := strings.NewReplacer("-", "_", ".", "_", " ", "_")
 	return strings.ToLower(replacer.Replace(strings.TrimSpace(key)))
@@ -283,15 +500,128 @@ func firstInt64(record map[string]any, keys ...string) int64 {
 	return 0
 }
 
+func floatValue(value any) (float64, bool) {
+	switch typed := value.(type) {
+	case json.Number:
+		parsed, err := typed.Float64()
+		return parsed, err == nil
+	case float64:
+		return typed, true
+	case float32:
+		return float64(typed), true
+	case int:
+		return float64(typed), true
+	case int64:
+		return float64(typed), true
+	case int32:
+		return float64(typed), true
+	case string:
+		parsed, err := strconv.ParseFloat(strings.TrimSpace(typed), 64)
+		return parsed, err == nil
+	default:
+		return 0, false
+	}
+}
+
+func boolValue(value any) (bool, bool) {
+	switch typed := value.(type) {
+	case bool:
+		return typed, true
+	case string:
+		parsed, err := strconv.ParseBool(strings.TrimSpace(typed))
+		return parsed, err == nil
+	default:
+		return false, false
+	}
+}
+
 func withFetchedAt(items []model.DataItem) []model.DataItem {
 	now := time.Now().Unix()
 	for index := range items {
 		if items[index].FetchedAt == 0 {
 			items[index].FetchedAt = now
 		}
-		if items[index].Source == "" {
-			items[index].Source = items[index].Source
-		}
 	}
 	return items
+}
+
+func readJSONResponse(resp *http.Response) (any, error) {
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	if err != nil {
+		return nil, fmt.Errorf("read upstream response: %w", err)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("upstream status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+
+	trimmed := bytes.TrimSpace(body)
+	if len(trimmed) == 0 {
+		return map[string]any{}, nil
+	}
+
+	var payload any
+	if err := json.Unmarshal(trimmed, &payload); err != nil {
+		return nil, fmt.Errorf("decode upstream response: %w", err)
+	}
+	return payload, nil
+}
+
+func jsonRequestBody(body any) (io.Reader, string, error) {
+	if body == nil {
+		return nil, "", nil
+	}
+
+	payload, err := json.Marshal(body)
+	if err != nil {
+		return nil, "", err
+	}
+	return bytes.NewReader(payload), "application/json", nil
+}
+
+func composeTokenValue(prefix, token string) string {
+	prefix = strings.TrimSpace(prefix)
+	if prefix == "" {
+		return token
+	}
+	return prefix + " " + token
+}
+
+func cloneHeaders(source map[string]string) map[string]string {
+	if len(source) == 0 {
+		return map[string]string{}
+	}
+
+	cloned := make(map[string]string, len(source))
+	for key, value := range source {
+		cloned[key] = value
+	}
+	return cloned
+}
+
+func formatFloat(value float64) string {
+	if value == float64(int64(value)) {
+		return strconv.FormatInt(int64(value), 10)
+	}
+	return strconv.FormatFloat(value, 'f', 2, 64)
+}
+
+func formatPercent(value float64) string {
+	if value < 0 {
+		value = 0
+	}
+	if value > 100 {
+		value = 100
+	}
+	return formatFloat(value) + "%"
+}
+
+func remainingPercent(used float64) float64 {
+	switch {
+	case used <= 0:
+		return 100
+	case used >= 100:
+		return 0
+	default:
+		return 100 - used
+	}
 }
