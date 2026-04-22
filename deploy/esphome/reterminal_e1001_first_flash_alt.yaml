@@ -1,0 +1,95 @@
+substitutions:
+  device_name: reterminal-e1001-stage1-alt
+  friendly_name: reTerminal E1001 Stage1 Alt
+  refresh_interval: 30s
+
+esphome:
+  name: ${device_name}
+  friendly_name: ${friendly_name}
+  comment: Alternate first-flash profile for reTerminal E1001 display bring-up.
+  on_boot:
+    priority: -100
+    then:
+      - component.update: epaper_display
+
+esp32:
+  board: esp32-s3-devkitc-1
+  framework:
+    type: arduino
+
+psram:
+  mode: octal
+  speed: 80MHz
+
+logger:
+
+api:
+  encryption:
+    key: !secret esphome_api_encryption_key
+
+ota:
+  - platform: esphome
+    password: !secret esphome_ota_password
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap:
+    ssid: "E1001 Flash"
+    password: !secret wifi_fallback_password
+
+captive_portal:
+
+font:
+  - file: "gfonts://Roboto+Mono@700"
+    id: font_title
+    size: 34
+    glyphs: ' !"#$%&''()*+,-./0123456789:;=?@ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz'
+  - file: "gfonts://Roboto+Mono@500"
+    id: font_md
+    size: 20
+    glyphs: ' !"#$%&''()*+,-./0123456789:;=?@ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz'
+  - file: "gfonts://Roboto+Mono@500"
+    id: font_sm
+    size: 14
+    glyphs: ' !"#$%&''()*+,-./0123456789:;=?@ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz'
+
+text_sensor:
+  - platform: wifi_info
+    ip_address:
+      id: wifi_ip
+      name: "${friendly_name} IP"
+
+spi:
+  clk_pin: GPIO7
+  mosi_pin: GPIO9
+
+display:
+  - platform: waveshare_epaper
+    id: epaper_display
+    model: 7.50inv2alt
+    cs_pin: GPIO10
+    dc_pin: GPIO11
+    reset_pin:
+      number: GPIO12
+      inverted: false
+    busy_pin:
+      number: GPIO13
+      inverted: true
+    reset_duration: 2ms
+    update_interval: ${refresh_interval}
+    lambda: |-
+      it.fill(COLOR_OFF);
+      it.rectangle(8, 8, 784, 464);
+      it.filled_rectangle(24, 372, 752, 52);
+
+      it.printf(36, 34, id(font_title), "ALT PROFILE");
+      it.printf(36, 92, id(font_md), "7.50inv2alt + reset_duration 2ms");
+      it.printf(36, 132, id(font_md), "If you see this, panel init is fixed");
+      it.printf(36, 176, id(font_sm), "Mac + ESPHome Docker + Web Serial first flash");
+      if (!id(wifi_ip).state.empty()) {
+        it.printf(36, 212, id(font_sm), "IP: %s", id(wifi_ip).state.c_str());
+      } else {
+        it.printf(36, 212, id(font_sm), "WiFi pending");
+      }
+      it.printf(36, 444, id(font_sm), "Black bar above should be visible");

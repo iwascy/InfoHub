@@ -1,0 +1,9 @@
+{
+  "proxies": {
+    "default": {
+      "httpProxy": "http://10.30.5.172:17897",
+      "httpsProxy": "http://10.30.5.172:17897",
+      "noProxy": "localhost,127.0.0.1,::1,supervisor,homeassistant,hassio,observer,.local,10.30.5.172,10.30.5.227,10.30.5.0/24,172.30.32.1,172.30.32.2,172.30.32.5,172.30.32.0/23,fd0c:ac1e:2100::1,fd0c:ac1e:2100::3"
+    }
+  }
+}

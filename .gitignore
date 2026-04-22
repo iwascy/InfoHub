@@ -3,3 +3,6 @@
 /bin/
 /data/
 /infohub
+/deploy/esphome/.esphome/
+/deploy/esphome/secrets.yaml
+/deploy/esphome/docker/.env

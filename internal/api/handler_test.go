@@ -219,10 +219,14 @@ func TestEInkDashboardRendersCustomLayout(t *testing.T) {
 		"AI 额度监控面板",
 		"Claude Relay 今日概览",
 		"Sub2API 账号额度",
-		"5H 消耗",
-		"Week 消耗",
+		">5H<",
+		">Week<",
 		"25,913,305",
 		"告警 1",
+		"71%",
+		"77%",
+		"56%",
+		"92%",
 		"kr2vv1nh@test1.susususu.fun：Week 余量 0%",
 		"admin10010：5H 余量仅 56%",
 		"Week 耗尽",
@@ -259,6 +263,26 @@ func TestDashboardRouteUsesDedicatedToken(t *testing.T) {
 		}
 	})
 
+	t.Run("accepts dedicated dashboard token for json", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/dashboard/eink.json?token=view-token", nil)
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("unexpected status code: %d body=%s", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("accepts dedicated dashboard token for device json", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/dashboard/eink/device.json?token=view-token", nil)
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("unexpected status code: %d body=%s", rec.Code, rec.Body.String())
+		}
+	})
+
 	t.Run("keeps api auth unchanged", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/api/v1/summary?token=view-token", nil)
 		rec := httptest.NewRecorder()
@@ -268,6 +292,247 @@ func TestDashboardRouteUsesDedicatedToken(t *testing.T) {
 			t.Fatalf("unexpected status code: %d", rec.Code)
 		}
 	})
+}
+
+func TestEInkDashboardDataReturnsStructuredPayload(t *testing.T) {
+	dataStore := store.NewMemoryStore()
+	mustSaveSnapshot(t, dataStore, "claude_relay", []model.DataItem{
+		{
+			Source:    "claude_relay",
+			Category:  "token_usage",
+			Title:     "今日 Token 用量",
+			Value:     "1058870",
+			FetchedAt: 1776766339,
+			Extra: map[string]any{
+				"daily_cost":       1.62,
+				"daily_requests":   14,
+				"enabled_accounts": 1,
+			},
+		},
+		{
+			Source:    "claude_relay",
+			Category:  "quota",
+			Title:     "账号 cycyzg 5H 额度",
+			Value:     "71%",
+			FetchedAt: 1776766339,
+			Extra: map[string]any{
+				"remaining_percent": 71,
+				"window":            "5H",
+				"reset_at":          "2026-04-21T22:00:00+08:00",
+			},
+		},
+		{
+			Source:    "claude_relay",
+			Category:  "quota",
+			Title:     "账号 cycyzg Week 额度",
+			Value:     "77%",
+			FetchedAt: 1776766339,
+			Extra: map[string]any{
+				"remaining_percent": 77,
+				"window":            "Week",
+				"reset_at":          "2026-04-26T00:00:00+08:00",
+			},
+		},
+	})
+
+	handler := NewHandler(dataStore, collector.NewRegistry(), nil)
+	req := httptest.NewRequest(http.MethodGet, "/dashboard/eink.json?refresh=300", nil)
+	rec := httptest.NewRecorder()
+	handler.EInkDashboardData(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("unexpected status code: %d", rec.Code)
+	}
+
+	var payload struct {
+		UpdatedAtUnix  int64 `json:"updated_at_unix"`
+		RefreshSeconds int   `json:"refresh_seconds"`
+		Overview       []struct {
+			Kind  string   `json:"kind"`
+			Title string   `json:"title"`
+			Value string   `json:"value"`
+			Stats []string `json:"stats"`
+		} `json:"overview"`
+		ClaudeTable struct {
+			HasRows bool `json:"has_rows"`
+			Rows    []struct {
+				Account  string `json:"account"`
+				Status   string `json:"status"`
+				FiveHour struct {
+					Percent int    `json:"percent"`
+					Text    string `json:"text"`
+				} `json:"five_hour"`
+				Week struct {
+					Percent int    `json:"percent"`
+					Text    string `json:"text"`
+				} `json:"week"`
+			} `json:"rows"`
+		} `json:"claude_table"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response failed: %v", err)
+	}
+
+	if payload.UpdatedAtUnix != 1776766339 {
+		t.Fatalf("unexpected updated_at_unix: %d", payload.UpdatedAtUnix)
+	}
+	if payload.RefreshSeconds != 300 {
+		t.Fatalf("unexpected refresh_seconds: %d", payload.RefreshSeconds)
+	}
+	if len(payload.Overview) == 0 || payload.Overview[0].Kind != "claude_relay" {
+		t.Fatalf("unexpected overview payload: %+v", payload.Overview)
+	}
+	if !payload.ClaudeTable.HasRows || len(payload.ClaudeTable.Rows) != 1 {
+		t.Fatalf("unexpected claude table rows: %+v", payload.ClaudeTable.Rows)
+	}
+	row := payload.ClaudeTable.Rows[0]
+	if row.FiveHour.Percent != 71 || row.FiveHour.Text != "71%" {
+		t.Fatalf("unexpected 5H payload: %+v", row.FiveHour)
+	}
+	if row.Week.Percent != 77 || row.Week.Text != "77%" {
+		t.Fatalf("unexpected week payload: %+v", row.Week)
+	}
+	if row.Status != "正常" {
+		t.Fatalf("unexpected row status: %s", row.Status)
+	}
+}
+
+func TestEInkDeviceDataReturnsCompactPayload(t *testing.T) {
+	dataStore := store.NewMemoryStore()
+	mustSaveSnapshot(t, dataStore, "claude_relay", []model.DataItem{
+		{
+			Source:    "claude_relay",
+			Category:  "token_usage",
+			Title:     "今日 Token 用量",
+			Value:     "1058870",
+			FetchedAt: 1776766339,
+			Extra: map[string]any{
+				"daily_cost":       1.62,
+				"daily_requests":   14,
+				"enabled_accounts": 1,
+			},
+		},
+		{
+			Source:    "claude_relay",
+			Category:  "quota",
+			Title:     "账号 cycyzg 5H 额度",
+			Value:     "71%",
+			FetchedAt: 1776766339,
+			Extra: map[string]any{
+				"remaining_percent": 71,
+				"window":            "5H",
+				"reset_at":          "2026-04-21T22:00:00+08:00",
+			},
+		},
+		{
+			Source:    "claude_relay",
+			Category:  "quota",
+			Title:     "账号 cycyzg Week 额度",
+			Value:     "77%",
+			FetchedAt: 1776766339,
+			Extra: map[string]any{
+				"remaining_percent": 77,
+				"window":            "Week",
+				"reset_at":          "2026-04-26T00:00:00+08:00",
+			},
+		},
+	})
+	mustSaveSnapshot(t, dataStore, "sub2api", []model.DataItem{
+		{
+			Source:    "sub2api",
+			Category:  "token_usage",
+			Title:     "今日 Token 用量",
+			Value:     "24854435",
+			FetchedAt: 1776766339,
+			Extra: map[string]any{
+				"daily_cost":       13.55,
+				"daily_requests":   394,
+				"enabled_accounts": 5,
+			},
+		},
+		{
+			Source:    "sub2api",
+			Category:  "quota",
+			Title:     "账号 admin10010 5H 额度",
+			Value:     "56%",
+			FetchedAt: 1776766339,
+			Extra: map[string]any{
+				"remaining_percent": 56,
+				"window":            "5H",
+			},
+		},
+		{
+			Source:    "sub2api",
+			Category:  "quota",
+			Title:     "账号 admin10010 Week 额度",
+			Value:     "92%",
+			FetchedAt: 1776766339,
+			Extra: map[string]any{
+				"remaining_percent": 92,
+				"window":            "Week",
+			},
+		},
+	})
+
+	handler := NewHandler(dataStore, collector.NewRegistry(), nil)
+	req := httptest.NewRequest(http.MethodGet, "/dashboard/eink/device.json?refresh=180", nil)
+	rec := httptest.NewRecorder()
+	handler.EInkDeviceData(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("unexpected status code: %d", rec.Code)
+	}
+
+	var payload struct {
+		UpdatedAtUnix  int64 `json:"updated_at_unix"`
+		RefreshSeconds int   `json:"refresh_seconds"`
+		Claude         struct {
+			Value        string `json:"value"`
+			Requests     int    `json:"requests"`
+			Cost         string `json:"cost"`
+			Enabled      int    `json:"enabled"`
+			ValueNumeric int64  `json:"value_numeric"`
+		} `json:"claude"`
+		Total struct {
+			Value    string `json:"value"`
+			Requests int    `json:"requests"`
+			Cost     string `json:"cost"`
+			Alerts   int    `json:"alerts"`
+		} `json:"total"`
+		Sub2APIRows []struct {
+			Account  string `json:"account"`
+			FiveHour struct {
+				Percent int `json:"percent"`
+			} `json:"five_hour"`
+			Status string `json:"status"`
+		} `json:"sub2api_rows"`
+		Alerts []string `json:"alerts"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response failed: %v", err)
+	}
+
+	if payload.UpdatedAtUnix != 1776766339 {
+		t.Fatalf("unexpected updated_at_unix: %d", payload.UpdatedAtUnix)
+	}
+	if payload.RefreshSeconds != 180 {
+		t.Fatalf("unexpected refresh_seconds: %d", payload.RefreshSeconds)
+	}
+	if payload.Claude.Value != "1,058,870" || payload.Claude.Requests != 14 || payload.Claude.Cost != "1.62" || payload.Claude.Enabled != 1 {
+		t.Fatalf("unexpected claude payload: %+v", payload.Claude)
+	}
+	if payload.Claude.ValueNumeric != 1058870 {
+		t.Fatalf("unexpected claude numeric payload: %+v", payload.Claude)
+	}
+	if payload.Total.Value != "25,913,305" || payload.Total.Requests != 408 || payload.Total.Cost != "15.17" || payload.Total.Alerts != 1 {
+		t.Fatalf("unexpected total payload: %+v", payload.Total)
+	}
+	if len(payload.Sub2APIRows) != 1 || payload.Sub2APIRows[0].Account != "admin10010" || payload.Sub2APIRows[0].FiveHour.Percent != 56 || payload.Sub2APIRows[0].Status != "关注" {
+		t.Fatalf("unexpected sub2api rows: %+v", payload.Sub2APIRows)
+	}
+	if len(payload.Alerts) != 1 || payload.Alerts[0] != "admin10010：5H 余量仅 56%" {
+		t.Fatalf("unexpected alerts: %+v", payload.Alerts)
+	}
 }
 
 func mustSaveSnapshot(t *testing.T, dataStore store.Store, source string, items []model.DataItem) {

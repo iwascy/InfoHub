@@ -18,6 +18,8 @@ func NewRouter(dataStore store.Store, registry *collector.Registry, scheduler *s
 	mux.HandleFunc("GET /api/v1/health", handler.Health)
 	mux.HandleFunc("POST /api/v1/collect/{name}", handler.Collect)
 	mux.Handle("GET /dashboard/eink", withDashboardAccess(http.HandlerFunc(handler.EInkDashboard), authToken, dashboardToken))
+	mux.Handle("GET /dashboard/eink.json", withDashboardAccess(http.HandlerFunc(handler.EInkDashboardData), authToken, dashboardToken))
+	mux.Handle("GET /dashboard/eink/device.json", withDashboardAccess(http.HandlerFunc(handler.EInkDeviceData), authToken, dashboardToken))
 
 	var root http.Handler = mux
 	root = withAuth(root, authToken)

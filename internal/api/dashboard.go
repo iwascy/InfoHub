@@ -342,8 +342,8 @@ var einkDashboardTmpl = template.Must(template.New("eink-dashboard").Parse(`<!do
             <thead>
               <tr>
                 <th style="width: 19%;">账号</th>
-                <th style="width: 33%;">5H 消耗</th>
-                <th style="width: 30%;">Week 消耗</th>
+                <th style="width: 33%;">5H</th>
+                <th style="width: 30%;">Week</th>
                 <th style="width: 18%;">状态</th>
               </tr>
             </thead>
@@ -391,8 +391,8 @@ var einkDashboardTmpl = template.Must(template.New("eink-dashboard").Parse(`<!do
             <thead>
               <tr>
                 <th style="width: 31%;">账号</th>
-                <th style="width: 29%;">5H 消耗</th>
-                <th style="width: 29%;">Week 消耗</th>
+                <th style="width: 29%;">5H</th>
+                <th style="width: 29%;">Week</th>
                 <th style="width: 11%;">状态</th>
               </tr>
             </thead>
@@ -442,42 +442,68 @@ var einkDashboardTmpl = template.Must(template.New("eink-dashboard").Parse(`<!do
 </html>`))
 
 type einkDashboardPage struct {
-	UpdatedAt      string
-	RefreshSeconds int
-	Overview       []einkOverviewCard
-	ClaudeTable    einkQuotaTable
-	Sub2APITable   einkQuotaTable
-	Alerts         []string
+	UpdatedAt      string             `json:"updated_at"`
+	UpdatedAtUnix  int64              `json:"updated_at_unix"`
+	RefreshSeconds int                `json:"refresh_seconds"`
+	Overview       []einkOverviewCard `json:"overview"`
+	ClaudeTable    einkQuotaTable     `json:"claude_table"`
+	Sub2APITable   einkQuotaTable     `json:"sub2api_table"`
+	Alerts         []string           `json:"alerts"`
 }
 
 type einkOverviewCard struct {
-	Title string
-	Value string
-	Label string
-	Stats []string
-	Icon  template.HTML
+	Kind  string        `json:"kind"`
+	Title string        `json:"title"`
+	Value string        `json:"value"`
+	Label string        `json:"label"`
+	Stats []string      `json:"stats"`
+	Icon  template.HTML `json:"-"`
 }
 
 type einkQuotaTable struct {
-	Title         string
-	Rows          []einkQuotaRow
-	HasRows       bool
-	ErrorText     string
-	FiveHourReset string
-	WeekReset     string
+	Title         string         `json:"title"`
+	Rows          []einkQuotaRow `json:"rows"`
+	HasRows       bool           `json:"has_rows"`
+	ErrorText     string         `json:"error_text,omitempty"`
+	FiveHourReset string         `json:"five_hour_reset"`
+	WeekReset     string         `json:"week_reset"`
 }
 
 type einkQuotaRow struct {
-	Account     string
-	FiveHour    einkPercentCell
-	Week        einkPercentCell
-	Status      string
-	StatusClass string
+	Account     string          `json:"account"`
+	FiveHour    einkPercentCell `json:"five_hour"`
+	Week        einkPercentCell `json:"week"`
+	Status      string          `json:"status"`
+	StatusClass string          `json:"status_class"`
 }
 
 type einkPercentCell struct {
-	Percent int
-	Text    string
+	Percent int    `json:"percent"`
+	Text    string `json:"text"`
+}
+
+type einkDeviceOverview struct {
+	Title        string `json:"title"`
+	Value        string `json:"value"`
+	Label        string `json:"label"`
+	Requests     int    `json:"requests"`
+	Cost         string `json:"cost"`
+	Enabled      int    `json:"enabled,omitempty"`
+	Alerts       int    `json:"alerts,omitempty"`
+	ValueNumeric int64  `json:"value_numeric"`
+}
+
+type einkDevicePayload struct {
+	UpdatedAt      string             `json:"updated_at"`
+	UpdatedAtUnix  int64              `json:"updated_at_unix"`
+	RefreshSeconds int                `json:"refresh_seconds"`
+	Claude         einkDeviceOverview `json:"claude"`
+	Sub2API        einkDeviceOverview `json:"sub2api"`
+	Total          einkDeviceOverview `json:"total"`
+	ClaudeRows     []einkQuotaRow     `json:"claude_rows"`
+	Sub2APIRows    []einkQuotaRow     `json:"sub2api_rows"`
+	Alerts         []string           `json:"alerts"`
+	ResetHints     map[string]string  `json:"reset_hints"`
 }
 
 type quotaAccount struct {
@@ -510,7 +536,28 @@ func (h *Handler) EInkDashboard(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (h *Handler) EInkDashboardData(w http.ResponseWriter, r *http.Request) {
+	snapshots, err := h.store.GetAll()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, buildEInkDashboardPage(snapshots, dashboardRefreshSeconds(r)))
+}
+
+func (h *Handler) EInkDeviceData(w http.ResponseWriter, r *http.Request) {
+	snapshots, err := h.store.GetAll()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, buildEInkDevicePayload(snapshots, dashboardRefreshSeconds(r)))
+}
+
 func buildEInkDashboardPage(snapshots map[string]model.SourceSnapshot, refreshSeconds int) einkDashboardPage {
+	updatedAtUnix := maxLastFetch(snapshots)
 	claudeOverview, claudeTable, claudeCritical, claudeAlerts := buildSourceDashboard("claude_relay", "Claude Relay 今日概览", snapshots["claude_relay"])
 	subOverview, subTable, subCritical, subAlerts := buildSourceDashboard("sub2api", "Sub2API 今日概览", snapshots["sub2api"])
 
@@ -519,7 +566,8 @@ func buildEInkDashboardPage(snapshots map[string]model.SourceSnapshot, refreshSe
 	alerts = append(alerts, claudeAlerts...)
 
 	return einkDashboardPage{
-		UpdatedAt:      formatHeaderTime(maxLastFetch(snapshots)),
+		UpdatedAt:      formatHeaderTime(updatedAtUnix),
+		UpdatedAtUnix:  updatedAtUnix,
 		RefreshSeconds: refreshSeconds,
 		Overview: []einkOverviewCard{
 			claudeOverview.Card,
@@ -529,6 +577,61 @@ func buildEInkDashboardPage(snapshots map[string]model.SourceSnapshot, refreshSe
 		ClaudeTable:  claudeTable,
 		Sub2APITable: subTable,
 		Alerts:       alerts,
+	}
+}
+
+func buildEInkDevicePayload(snapshots map[string]model.SourceSnapshot, refreshSeconds int) einkDevicePayload {
+	updatedAtUnix := maxLastFetch(snapshots)
+	claudeOverview, claudeTable, _, claudeAlerts := buildSourceDashboard("claude_relay", "Claude Relay 今日概览", snapshots["claude_relay"])
+	subOverview, subTable, _, subAlerts := buildSourceDashboard("sub2api", "Sub2API 今日概览", snapshots["sub2api"])
+
+	totalToken := claudeOverview.TokenValue + subOverview.TokenValue
+	totalRequests := int(math.Round(claudeOverview.Requests + subOverview.Requests))
+	totalCost := claudeOverview.Cost + subOverview.Cost
+
+	alerts := append([]string{}, subAlerts...)
+	alerts = append(alerts, claudeAlerts...)
+
+	return einkDevicePayload{
+		UpdatedAt:      formatHeaderTime(updatedAtUnix),
+		UpdatedAtUnix:  updatedAtUnix,
+		RefreshSeconds: refreshSeconds,
+		Claude: einkDeviceOverview{
+			Title:        claudeOverview.Card.Title,
+			Value:        claudeOverview.Card.Value,
+			Label:        claudeOverview.Card.Label,
+			Requests:     int(math.Round(claudeOverview.Requests)),
+			Cost:         fmt.Sprintf("%.2f", claudeOverview.Cost),
+			Enabled:      int(math.Round(claudeOverview.EnabledAccount)),
+			ValueNumeric: int64(math.Round(claudeOverview.TokenValue)),
+		},
+		Sub2API: einkDeviceOverview{
+			Title:        subOverview.Card.Title,
+			Value:        subOverview.Card.Value,
+			Label:        subOverview.Card.Label,
+			Requests:     int(math.Round(subOverview.Requests)),
+			Cost:         fmt.Sprintf("%.2f", subOverview.Cost),
+			Enabled:      int(math.Round(subOverview.EnabledAccount)),
+			ValueNumeric: int64(math.Round(subOverview.TokenValue)),
+		},
+		Total: einkDeviceOverview{
+			Title:        "今日合计",
+			Value:        formatPrimaryNumber(totalToken),
+			Label:        "总 Token",
+			Requests:     totalRequests,
+			Cost:         fmt.Sprintf("%.2f", totalCost),
+			Alerts:       len(alerts),
+			ValueNumeric: int64(math.Round(totalToken)),
+		},
+		ClaudeRows:  claudeTable.Rows,
+		Sub2APIRows: subTable.Rows,
+		Alerts:      alerts,
+		ResetHints: map[string]string{
+			"claude_five_hour":  claudeTable.FiveHourReset,
+			"claude_week":       claudeTable.WeekReset,
+			"sub2api_five_hour": subTable.FiveHourReset,
+			"sub2api_week":      subTable.WeekReset,
+		},
 	}
 }
 
@@ -543,6 +646,7 @@ type sourceOverview struct {
 func buildSourceDashboard(sourceKey string, title string, snapshot model.SourceSnapshot) (sourceOverview, einkQuotaTable, int, []string) {
 	overview := sourceOverview{
 		Card: einkOverviewCard{
+			Kind:  sourceKey,
 			Title: title,
 			Value: "--",
 			Label: "Token 用量",
@@ -604,6 +708,7 @@ func buildSourceDashboard(sourceKey string, title string, snapshot model.SourceS
 
 func buildTotalOverview(claude sourceOverview, sub sourceOverview, criticalCount int) einkOverviewCard {
 	return einkOverviewCard{
+		Kind:  "total",
 		Title: "今日合计",
 		Value: formatPrimaryNumber(claude.TokenValue + sub.TokenValue),
 		Label: "总 Token",
@@ -680,12 +785,12 @@ func buildQuotaRow(account quotaAccount) einkQuotaRow {
 	return einkQuotaRow{
 		Account: account.Name,
 		FiveHour: einkPercentCell{
-			Percent: account.FiveHour.UsedPercent,
-			Text:    formatPercentText(account.FiveHour.UsedPercent),
+			Percent: account.FiveHour.RemainingPercent,
+			Text:    formatPercentText(account.FiveHour.RemainingPercent),
 		},
 		Week: einkPercentCell{
-			Percent: account.Week.UsedPercent,
-			Text:    formatPercentText(account.Week.UsedPercent),
+			Percent: account.Week.RemainingPercent,
+			Text:    formatPercentText(account.Week.RemainingPercent),
 		},
 		Status:      status,
 		StatusClass: className,

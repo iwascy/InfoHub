@@ -1,0 +1,456 @@
+# Stage 2 profile:
+# first finish USB bring-up with a known-good Stage 1 profile,
+# then switch to this API-driven panel.
+# 2026-04-22 实测当前这台 E1001 需要 7.50inv2alt + reset_duration 2ms
+# 才能稳定结束白屏并正常点亮。
+
+substitutions:
+  device_name: reterminal-e1001-infohub
+  friendly_name: reTerminal E1001 InfoHub
+  poll_interval: 5min
+
+esphome:
+  name: ${device_name}
+  friendly_name: ${friendly_name}
+  on_boot:
+    priority: -100
+    then:
+      - script.execute: fetch_dashboard_payload
+
+esp32:
+  board: esp32-s3-devkitc-1
+  framework:
+    type: arduino
+
+psram:
+  mode: octal
+  speed: 80MHz
+
+logger:
+
+api:
+  encryption:
+    key: !secret esphome_api_encryption_key
+
+ota:
+  - platform: esphome
+    password: !secret esphome_ota_password
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap:
+    ssid: "InfoHub Fallback"
+    password: !secret wifi_fallback_password
+
+captive_portal:
+
+json:
+
+http_request:
+  verify_ssl: false
+  timeout: 20s
+  watchdog_timeout: 25s
+  useragent: ${device_name}
+
+font:
+  - file: "gfonts://Noto+Sans+SC@700"
+    id: font_title
+    size: 28
+    glyphs: ' 0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz%$.,:-_+/()[]#&!?@*=<>"''：刷新时间面板请求成本启用告警总量今日合计余仅正常关注充足最佳耗尽数据等待首次拉取失败离线状态重置暂无同步·Σ前号定度异当控提有析概没点监稳览解账还配醒额'
+  - file: "gfonts://Noto+Sans+SC@600"
+    id: font_md
+    size: 20
+    glyphs: ' 0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz%$.,:-_+/()[]#&!?@*=<>"''：刷新时间面板请求成本启用告警总量今日合计余仅正常关注充足最佳耗尽数据等待首次拉取失败离线状态重置暂无同步·Σ前号定度异当控提有析概没点监稳览解账还配醒额'
+  - file: "gfonts://Noto+Sans+SC@500"
+    id: font_sm
+    size: 16
+    glyphs: ' 0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz%$.,:-_+/()[]#&!?@*=<>"''：刷新时间面板请求成本启用告警总量今日合计余仅正常关注充足最佳耗尽数据等待首次拉取失败离线状态重置暂无同步·Σ前号定度异当控提有析概没点监稳览解账还配醒额'
+  - file: "gfonts://Noto+Sans+SC@500"
+    id: font_xs
+    size: 12
+    glyphs: ' 0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz%$.,:-_+/()[]#&!?@*=<>"''：刷新时间面板请求成本启用告警总量今日合计余仅正常关注充足最佳耗尽数据等待首次拉取失败离线状态重置暂无同步·Σ前号定度异当控提有析概没点监稳览解账还配醒额'
+
+globals:
+  - id: last_payload_body
+    type: std::string
+    restore_value: no
+    initial_value: '""'
+  - id: last_error_text
+    type: std::string
+    restore_value: no
+    initial_value: '""'
+  - id: pending_display_refresh
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+
+spi:
+  clk_pin: GPIO7
+  mosi_pin: GPIO9
+
+script:
+  - id: fetch_dashboard_payload
+    mode: restart
+    then:
+      - http_request.get:
+          url: !secret infohub_eink_device_url
+          capture_response: true
+          max_response_buffer_size: 16384
+          on_response:
+            then:
+              - lambda: |-
+                  bool should_refresh = false;
+                  if (response->status_code != 200) {
+                    std::string next_error = "HTTP " + std::to_string(response->status_code);
+                    if (id(last_error_text) != next_error) {
+                      id(last_error_text) = next_error;
+                      should_refresh = true;
+                    }
+                    id(pending_display_refresh) = should_refresh;
+                    return;
+                  }
+
+                  if (id(last_payload_body) != body) {
+                    id(last_payload_body) = body;
+                    should_refresh = true;
+                  }
+
+                  if (!id(last_error_text).empty()) {
+                    id(last_error_text).clear();
+                    should_refresh = true;
+                  }
+
+                  id(pending_display_refresh) = should_refresh;
+              - if:
+                  condition:
+                    lambda: return id(pending_display_refresh);
+                  then:
+                    - component.update: epaper_display
+                    - lambda: id(pending_display_refresh) = false;
+          on_error:
+            then:
+              - lambda: |-
+                  std::string next_error = "network error";
+                  bool should_refresh = id(last_error_text) != next_error;
+                  id(last_error_text) = next_error;
+                  id(pending_display_refresh) = should_refresh;
+              - if:
+                  condition:
+                    lambda: return id(pending_display_refresh);
+                  then:
+                    - component.update: epaper_display
+                    - lambda: id(pending_display_refresh) = false;
+
+interval:
+  - interval: ${poll_interval}
+    then:
+      - script.execute: fetch_dashboard_payload
+
+button:
+  - platform: template
+    name: "${friendly_name} Force Sync"
+    on_press:
+      - script.execute: fetch_dashboard_payload
+
+binary_sensor:
+  - platform: gpio
+    pin:
+      number: GPIO3
+      mode: INPUT_PULLUP
+      inverted: true
+    name: "${friendly_name} Refresh Button"
+    on_press:
+      then:
+        - script.execute: fetch_dashboard_payload
+
+display:
+  - platform: waveshare_epaper
+    id: epaper_display
+    # 官方示例常见为 7.50inv2，但当前设备实测需要 alt 初始化参数。
+    # 若后续确认屏幕批次支持硬件 partial refresh，再单独评估 7.50inV2p。
+    model: 7.50inv2alt
+    cs_pin: GPIO10
+    dc_pin: GPIO11
+    reset_pin:
+      number: GPIO12
+      inverted: false
+    busy_pin:
+      number: GPIO13
+      inverted: true
+    reset_duration: 2ms
+    update_interval: never
+    lambda: |-
+      it.fill(COLOR_OFF);
+
+      auto trim_ascii = [&](const std::string &value, size_t max_chars) -> std::string {
+        if (value.size() <= max_chars) {
+          return value;
+        }
+        if (max_chars <= 2) {
+          return value.substr(0, max_chars);
+        }
+        return value.substr(0, max_chars - 2) + "..";
+      };
+
+      auto draw_progress = [&](int x, int y, int w, int percent) {
+        int safe_percent = percent;
+        if (safe_percent < 0) {
+          safe_percent = 0;
+        }
+        if (safe_percent > 100) {
+          safe_percent = 100;
+        }
+        it.rectangle(x, y, w, 10);
+        int fill = ((w - 2) * safe_percent) / 100;
+        if (fill > 0) {
+          it.filled_rectangle(x + 1, y + 1, fill, 8);
+        }
+      };
+
+      struct OverviewData {
+        std::string title;
+        std::string value;
+        std::string label;
+        std::string cost;
+        int requests;
+        int enabled;
+        int alerts;
+      };
+
+      struct RowData {
+        std::string account;
+        int five_percent;
+        int week_percent;
+        std::string status;
+      };
+
+      OverviewData claude = {"Claude", "--", "Token", "--", 0, -1, 0};
+      OverviewData sub2api = {"Sub2API", "--", "Token", "--", 0, -1, 0};
+      OverviewData total = {"Total", "--", "Token", "--", 0, -1, 0};
+
+      RowData claude_rows[2] = {{"--", -1, -1, "--"}, {"--", -1, -1, "--"}};
+      RowData sub2api_rows[2] = {{"--", -1, -1, "--"}, {"--", -1, -1, "--"}};
+      int claude_row_count = 0;
+      int sub2api_row_count = 0;
+
+      std::string alert_lines[3] = {"暂无告警", "", ""};
+      int alert_count = 0;
+
+      std::string updated_at = "--";
+      std::string reset_claude = "--";
+      std::string reset_sub2api = "--";
+      int refresh_seconds = 0;
+
+      auto draw_card = [&](int x, int y, int w, const char *badge, const OverviewData &item) {
+        it.rectangle(x, y, w, 96);
+        it.rectangle(x + 12, y + 12, 42, 42);
+        it.printf(x + 22, y + 24, id(font_sm), "%s", badge);
+        it.printf(x + 66, y + 12, id(font_sm), "%s", item.title.c_str());
+        it.printf(x + 66, y + 34, id(font_title), "%s", item.value.c_str());
+        it.printf(x + 66, y + 68, id(font_xs), "%s", item.label.c_str());
+        it.printf(x + 12, y + 82, id(font_xs), "请求 %d", item.requests);
+        it.printf(x + 94, y + 82, id(font_xs), "成本 %s", item.cost.c_str());
+        if (item.enabled >= 0) {
+          it.printf(x + w - 70, y + 82, id(font_xs), "启用 %d", item.enabled);
+        } else if (item.alerts > 0) {
+          it.printf(x + w - 78, y + 82, id(font_xs), "告警 %d", item.alerts);
+        }
+      };
+
+      auto draw_row = [&](int x, int y, int w, const RowData &row) {
+        it.rectangle(x, y, w, 24);
+        it.printf(x + 8, y + 7, id(font_xs), "%s", trim_ascii(row.account, 12).c_str());
+
+        std::string five_text = row.five_percent < 0 ? "--" : std::to_string(row.five_percent) + "%";
+        std::string week_text = row.week_percent < 0 ? "--" : std::to_string(row.week_percent) + "%";
+
+        it.printf(x + 110, y + 7, id(font_xs), "%s", five_text.c_str());
+        draw_progress(x + 142, y + 8, 70, row.five_percent);
+
+        it.printf(x + 220, y + 7, id(font_xs), "%s", week_text.c_str());
+        draw_progress(x + 252, y + 8, 70, row.week_percent);
+
+        it.rectangle(x + w - 64, y + 4, 56, 16);
+        it.printf(x + w - 56, y + 7, id(font_xs), "%s", trim_ascii(row.status, 6).c_str());
+      };
+
+      auto load_row = [&](JsonObject src, RowData &dst) {
+        const char *account = src["account"] | "--";
+        const char *status = src["status"] | "--";
+        JsonObject five = src["five_hour"];
+        JsonObject week = src["week"];
+
+        dst.account = account != nullptr ? account : "--";
+        dst.status = status != nullptr ? status : "--";
+        dst.five_percent = five["percent"] | -1;
+        dst.week_percent = week["percent"] | -1;
+      };
+
+      bool parsed = false;
+      if (!id(last_payload_body).empty()) {
+        parsed = json::parse_json(id(last_payload_body), [&](JsonObject root) -> bool {
+          const char *updated = root["updated_at"] | "--";
+          updated_at = updated != nullptr ? updated : "--";
+          refresh_seconds = root["refresh_seconds"] | 0;
+
+          JsonObject claude_obj = root["claude"];
+          const char *claude_title = claude_obj["title"] | "Claude";
+          const char *claude_value = claude_obj["value"] | "--";
+          const char *claude_label = claude_obj["label"] | "Token";
+          const char *claude_cost = claude_obj["cost"] | "--";
+          claude.title = claude_title != nullptr ? claude_title : "Claude";
+          claude.value = claude_value != nullptr ? claude_value : "--";
+          claude.label = claude_label != nullptr ? claude_label : "Token";
+          claude.cost = claude_cost != nullptr ? claude_cost : "--";
+          claude.requests = claude_obj["requests"] | 0;
+          claude.enabled = claude_obj["enabled"] | -1;
+
+          JsonObject sub2api_obj = root["sub2api"];
+          const char *sub_title = sub2api_obj["title"] | "Sub2API";
+          const char *sub_value = sub2api_obj["value"] | "--";
+          const char *sub_label = sub2api_obj["label"] | "Token";
+          const char *sub_cost = sub2api_obj["cost"] | "--";
+          sub2api.title = sub_title != nullptr ? sub_title : "Sub2API";
+          sub2api.value = sub_value != nullptr ? sub_value : "--";
+          sub2api.label = sub_label != nullptr ? sub_label : "Token";
+          sub2api.cost = sub_cost != nullptr ? sub_cost : "--";
+          sub2api.requests = sub2api_obj["requests"] | 0;
+          sub2api.enabled = sub2api_obj["enabled"] | -1;
+
+          JsonObject total_obj = root["total"];
+          const char *total_title = total_obj["title"] | "Total";
+          const char *total_value = total_obj["value"] | "--";
+          const char *total_label = total_obj["label"] | "Token";
+          const char *total_cost = total_obj["cost"] | "--";
+          total.title = total_title != nullptr ? total_title : "Total";
+          total.value = total_value != nullptr ? total_value : "--";
+          total.label = total_label != nullptr ? total_label : "Token";
+          total.cost = total_cost != nullptr ? total_cost : "--";
+          total.requests = total_obj["requests"] | 0;
+          total.alerts = total_obj["alerts"] | 0;
+          total.enabled = -1;
+
+          JsonArray claude_array = root["claude_rows"].as<JsonArray>();
+          if (!claude_array.isNull()) {
+            for (JsonVariant row_var : claude_array) {
+              if (claude_row_count >= 2) {
+                break;
+              }
+              JsonObject row = row_var.as<JsonObject>();
+              load_row(row, claude_rows[claude_row_count]);
+              claude_row_count++;
+            }
+          }
+
+          JsonArray sub2api_array = root["sub2api_rows"].as<JsonArray>();
+          if (!sub2api_array.isNull()) {
+            for (JsonVariant row_var : sub2api_array) {
+              if (sub2api_row_count >= 2) {
+                break;
+              }
+              JsonObject row = row_var.as<JsonObject>();
+              load_row(row, sub2api_rows[sub2api_row_count]);
+              sub2api_row_count++;
+            }
+          }
+
+          JsonArray alerts_array = root["alerts"].as<JsonArray>();
+          if (!alerts_array.isNull()) {
+            for (JsonVariant item : alerts_array) {
+              if (alert_count >= 3) {
+                break;
+              }
+              const char *text = item.as<const char *>();
+              alert_lines[alert_count] = text != nullptr ? text : "--";
+              alert_count++;
+            }
+          }
+
+          JsonObject reset_obj = root["reset_hints"];
+          const char *reset_claude_text = reset_obj["claude_five_hour"] | "--";
+          const char *reset_sub2api_text = reset_obj["sub2api_five_hour"] | "--";
+          reset_claude = reset_claude_text != nullptr ? reset_claude_text : "--";
+          reset_sub2api = reset_sub2api_text != nullptr ? reset_sub2api_text : "--";
+          return true;
+        });
+      }
+
+      it.rectangle(10, 10, 780, 48);
+      it.printf(24, 22, id(font_md), "InfoHub EInk");
+      it.printf(260, 22, id(font_sm), "刷新时间 %s", updated_at.c_str());
+
+      if (!id(last_error_text).empty()) {
+        it.printf(580, 22, id(font_sm), "状态 %s", id(last_error_text).c_str());
+      } else if (!parsed) {
+        it.printf(580, 22, id(font_sm), "状态 首次拉取");
+      } else {
+        it.printf(580, 22, id(font_sm), "状态 正常");
+      }
+
+      if (!parsed) {
+        it.rectangle(16, 80, 768, 384);
+        if (id(last_payload_body).empty()) {
+          it.printf(36, 118, id(font_title), "等待首次拉取");
+          it.printf(36, 166, id(font_md), "Waiting for device.json");
+        } else {
+          it.printf(36, 118, id(font_title), "数据解析失败");
+          it.printf(36, 166, id(font_md), "Check device.json payload");
+        }
+        it.printf(36, 222, id(font_sm), "Error: %s", id(last_error_text).empty() ? "--" : id(last_error_text).c_str());
+        it.printf(36, 250, id(font_sm), "Buttons: Force Sync / GPIO3");
+        return;
+      }
+
+      draw_card(16, 72, 248, "C", claude);
+      draw_card(276, 72, 248, "S", sub2api);
+      draw_card(536, 72, 248, "T", total);
+
+      it.rectangle(16, 180, 376, 134);
+      it.printf(28, 192, id(font_sm), "Claude Relay");
+      it.printf(168, 192, id(font_xs), "5H");
+      it.printf(278, 192, id(font_xs), "Week");
+      if (claude_row_count == 0) {
+        it.printf(28, 224, id(font_sm), "暂无数据");
+      } else {
+        draw_row(24, 212, 360, claude_rows[0]);
+        if (claude_row_count > 1) {
+          draw_row(24, 240, 360, claude_rows[1]);
+        }
+      }
+      it.printf(28, 290, id(font_xs), "%s", trim_ascii(reset_claude, 42).c_str());
+
+      it.rectangle(16, 326, 376, 138);
+      it.printf(28, 338, id(font_sm), "Sub2API");
+      it.printf(168, 338, id(font_xs), "5H");
+      it.printf(278, 338, id(font_xs), "Week");
+      if (sub2api_row_count == 0) {
+        it.printf(28, 370, id(font_sm), "暂无数据");
+      } else {
+        draw_row(24, 358, 360, sub2api_rows[0]);
+        if (sub2api_row_count > 1) {
+          draw_row(24, 386, 360, sub2api_rows[1]);
+        }
+      }
+      it.printf(28, 438, id(font_xs), "%s", trim_ascii(reset_sub2api, 42).c_str());
+
+      it.rectangle(408, 180, 376, 284);
+      it.printf(420, 192, id(font_sm), "告警");
+      if (alert_count == 0) {
+        it.printf(420, 226, id(font_sm), "暂无告警");
+      } else {
+        it.printf(420, 226, id(font_sm), "1. %s", trim_ascii(alert_lines[0], 34).c_str());
+        if (alert_count > 1) {
+          it.printf(420, 256, id(font_sm), "2. %s", trim_ascii(alert_lines[1], 34).c_str());
+        }
+        if (alert_count > 2) {
+          it.printf(420, 286, id(font_sm), "3. %s", trim_ascii(alert_lines[2], 34).c_str());
+        }
+      }
+
+      it.filled_rectangle(420, 326, 344, 1);
+      it.printf(420, 340, id(font_xs), "Requests %d", total.requests);
+      it.printf(420, 364, id(font_xs), "Refresh %d s", refresh_seconds);
+      it.printf(420, 388, id(font_xs), "Sync: Force Sync / GPIO3");
+      it.printf(420, 412, id(font_xs), "Display: 7.50inv2alt + 2ms");
+      it.printf(420, 436, id(font_xs), "Refresh on payload change");

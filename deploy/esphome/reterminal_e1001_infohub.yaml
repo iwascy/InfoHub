@@ -1,0 +1,86 @@
+substitutions:
+  device_name: reterminal-e1001-infohub
+  friendly_name: reTerminal E1001 InfoHub
+  puppet_base_url: http://10.30.5.227:10000
+  puppet_page_path: infohub-eink/default_view
+  screenshot_url: ${puppet_base_url}/${puppet_page_path}?viewport=800x480&eink=2&invert
+
+esphome:
+  name: ${device_name}
+  friendly_name: ${friendly_name}
+
+esp32:
+  board: esp32-s3-devkitc-1
+  framework:
+    type: arduino
+
+psram:
+  mode: octal
+  speed: 80MHz
+
+logger:
+
+api:
+  encryption:
+    key: !secret esphome_api_encryption_key
+
+ota:
+  - platform: esphome
+    password: !secret esphome_ota_password
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap:
+    ssid: "InfoHub Fallback"
+    password: !secret wifi_fallback_password
+
+http_request:
+  verify_ssl: false
+  timeout: 20s
+  watchdog_timeout: 25s
+
+captive_portal:
+
+spi:
+  clk_pin: GPIO7
+  mosi_pin: GPIO9
+
+online_image:
+  - id: dashboard_image
+    format: PNG
+    type: GRAYSCALE
+    buffer_size: 65536
+    url: ${screenshot_url}
+    update_interval: 10min
+    on_download_finished:
+      - component.update: epaper_display
+
+display:
+  - platform: waveshare_epaper
+    id: epaper_display
+    # 2026-04-22 实测当前这台 E1001 需要 alt 初始化参数才能正常点亮。
+    model: 7.50inv2alt
+    cs_pin: GPIO10
+    dc_pin: GPIO11
+    reset_pin:
+      number: GPIO12
+      inverted: false
+    busy_pin:
+      number: GPIO13
+      inverted: true
+    reset_duration: 2ms
+    update_interval: 10min
+    lambda: |-
+      it.image(0, 0, id(dashboard_image));
+
+binary_sensor:
+  - platform: gpio
+    pin:
+      number: GPIO3
+      mode: INPUT_PULLUP
+      inverted: true
+    name: "${friendly_name} Refresh Button"
+    on_press:
+      then:
+        - component.update: dashboard_image

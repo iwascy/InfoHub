@@ -31,7 +31,7 @@ func withAuth(next http.Handler, token string) http.Handler {
 
 	expected := "Bearer " + strings.TrimSpace(token)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/dashboard/eink" {
+		if r.URL.Path == "/dashboard/eink" || r.URL.Path == "/dashboard/eink.json" || r.URL.Path == "/dashboard/eink/device.json" {
 			next.ServeHTTP(w, r)
 			return
 		}
