@@ -82,11 +82,11 @@ font:
     id: font_header
     size: 24
     glyphs: ' 0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz%$.,:-_+/()[]#&!?@*=<>"''：刷新时间状态等待首次拉取数据解析失败请求成本启用告警总量今日合计余仅正常关注充足最佳耗尽重置暂无同步与系统概览配额显示按键周期点急低电量'
-  - file: "gfonts://Noto+Sans+SC@500"
+  - file: "gfonts://Noto+Sans+SC@700"
     id: font_time
     size: 16
     glyphs: ' 0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz%$.,:-_+/()[]#&!?@*=<>"''：刷新时间状态等待首次拉取数据解析失败请求成本启用告警总量今日合计余仅正常关注充足最佳耗尽重置暂无同步与系统概览配额显示按键周期点急低电量'
-  - file: "gfonts://Noto+Sans+SC@500"
+  - file: "gfonts://Noto+Sans+SC@700"
     id: font_label
     size: 17
     glyphs: ' 0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz%$.,:-_+/()[]#&!?@*=<>"''：刷新时间状态等待首次拉取数据解析失败请求成本启用告警总量今日合计余仅正常关注充足最佳耗尽重置暂无同步与系统概览配额显示按键周期点急低电量'
@@ -102,11 +102,11 @@ font:
     id: font_md
     size: 15
     glyphs: ' 0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz%$.,:-_+/()[]#&!?@*=<>"''：刷新时间状态等待首次拉取数据解析失败请求成本启用告警总量今日合计余仅正常关注充足最佳耗尽重置暂无同步与系统概览配额显示按键周期点急低电量'
-  - file: "gfonts://Noto+Sans+SC@500"
+  - file: "gfonts://Noto+Sans+SC@700"
     id: font_sm
     size: 14
     glyphs: ' 0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz%$.,:-_+/()[]#&!?@*=<>"''：刷新时间状态等待首次拉取数据解析失败请求成本启用告警总量今日合计余仅正常关注充足最佳耗尽重置暂无同步与系统概览配额显示按键周期点急低电量'
-  - file: "gfonts://Noto+Sans+SC@500"
+  - file: "gfonts://Noto+Sans+SC@700"
     id: font_xs
     size: 13
     glyphs: ' 0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz%$.,:-_+/()[]#&!?@*=<>"''：刷新时间状态等待首次拉取数据解析失败请求成本启用告警总量今日合计余仅正常关注充足最佳耗尽重置暂无同步与系统概览配额显示按键周期点急低电量'
@@ -945,7 +945,7 @@ display:
         return "$" + cost;
       };
 
-      auto draw_overview_card = [&](const Rect &box, const std::string &title, const OverviewData &item, bool show_alerts) {
+      auto draw_overview_card = [&](const Rect &box, const std::string &title, const OverviewData &item) {
         std::string fitted_title = fit_text_width(id(font_label), title, box.w - 24);
         std::string value_m = format_token_m(item);
         std::string money_text = format_money(item.cost);
@@ -960,18 +960,6 @@ display:
         it.end_clipping();
 
         it.line(box.x + 12, divider_y, box.x + box.w - 12, divider_y);
-        if (show_alerts && item.alerts > 0) {
-          it.printf(
-            box.x + 12,
-            divider_y + 7,
-            id(font_sm),
-            "%s",
-            fit_text_width(id(font_sm), money_text, box.w - 104).c_str()
-          );
-          it.printf(box.x + box.w - 12, divider_y + 7, id(font_sm), TextAlign::TOP_RIGHT, "告警 %d", item.alerts);
-          return;
-        }
-
         it.printf(box.x + 12, divider_y + 7, id(font_sm), "%s", fit_text_width(id(font_sm), money_text, box.w - 24).c_str());
       };
 
@@ -1040,17 +1028,17 @@ display:
       };
 
       auto draw_quota_card = [&](const Rect &box, const std::string &title, const std::string &reset_text, const RowData &row, bool show_reset) {
-        int metric_top = box.y + (show_reset ? 52 : 39);
-        int track_y = box.y + (show_reset ? 78 : 63);
-        int divider_top = box.y + (show_reset ? 53 : 38);
-        int divider_bottom = box.y + (show_reset ? 94 : 79);
+        int metric_top = box.y + (show_reset ? 63 : 39);
+        int track_y = box.y + (show_reset ? 91 : 63);
+        int divider_top = box.y + (show_reset ? 64 : 38);
+        int divider_bottom = box.y + (show_reset ? 107 : 79);
         Rect five_track{box.x + 12, track_y, 190, 9};
         Rect week_track{box.x + 252, track_y, 230, 9};
 
         draw_outline_round_rect(box, 0);
         it.printf(box.x + 12, box.y + 10, id(font_title), "%s", fit_text_width(id(font_title), title, box.w - 24).c_str());
         if (show_reset) {
-          it.printf(box.x + 12, box.y + 32, id(font_xs), "%s", fit_text_width(id(font_xs), reset_text, box.w - 24).c_str());
+          it.printf(box.x + 12, box.y + 36, id(font_xs), "%s", fit_text_width(id(font_xs), reset_text, box.w - 24).c_str());
         }
 
         it.printf(box.x + 12, metric_top, id(font_metric), "5H");
@@ -1263,10 +1251,10 @@ display:
         return;
       }
 
-      draw_overview_card(overview_claude, "Claude", claude, false);
-      draw_overview_card(overview_codex, "Codex", codex, false);
-      draw_overview_card(overview_total, "合计", total, true);
+      draw_overview_card(overview_claude, "Claude", claude);
+      draw_overview_card(overview_codex, "Codex", codex);
+      draw_overview_card(overview_total, "合计", total);
 
-      draw_quota_card(quota_claude, "Claude 配额", reset_claude, claude_focus, false);
+      draw_quota_card(quota_claude, "Claude 配额", reset_claude, claude_focus, true);
       draw_quota_card(quota_codex, "Codex 配额", reset_codex, codex_focus, true);
       draw_system_panel(system_panel, alert_count, alert_title, alert_detail, refresh_seconds);
