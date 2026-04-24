@@ -217,20 +217,22 @@ func TestEInkDashboardRendersCustomLayout(t *testing.T) {
 
 	body := rec.Body.String()
 	for _, expected := range []string{
-		"AI 额度监控面板",
-		"Claude Relay 今日概览",
-		"Sub2API 账号额度",
+		"InfoHub 墨水屏面板",
+		"InfoHub",
+		"Claude 配额",
+		"Codex 配额",
 		">5H<",
 		">Week<",
-		"25,913,305",
-		"告警 1",
+		"1.1M",
+		"24.9M",
+		"25.9M",
+		"刷新周期 600s",
 		"71%",
 		"77%",
 		"56%",
 		"92%",
-		"kr2vv1nh@test1.susususu.fun：Week 余量 0%",
-		"admin10010：5H 余量仅 56%",
-		"Week 耗尽",
+		"admin10010",
+		"5H 余量仅 56%",
 	} {
 		if !strings.Contains(body, expected) {
 			t.Fatalf("dashboard body missing %q", expected)

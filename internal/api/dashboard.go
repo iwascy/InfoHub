@@ -24,17 +24,16 @@ var einkDashboardTmpl = template.Must(template.New("eink-dashboard").Parse(`<!do
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta http-equiv="refresh" content="{{.RefreshSeconds}}">
-  <title>AI 额度监控面板</title>
+  <title>InfoHub 墨水屏面板</title>
   <style>
     :root {
       color-scheme: light;
-      --bg: #f5f5f5;
-      --panel: #ffffff;
+      --bg: #f0ede6;
+      --panel: #f5f3ec;
       --ink: #111111;
-      --muted: #5e5e5e;
-      --line: #111111;
-      --soft-line: #c8c8c8;
-      --radius: 16px;
+      --muted: #555555;
+      --line: #222222;
+      --soft-line: rgba(34, 34, 34, 0.5);
     }
     * { box-sizing: border-box; }
     html, body {
@@ -48,395 +47,244 @@ var einkDashboardTmpl = template.Must(template.New("eink-dashboard").Parse(`<!do
     }
     body {
       overflow: hidden;
+      display: grid;
+      place-items: center;
     }
     .page {
-      width: 100vw;
-      height: 100vh;
-      padding: 1.8vh 1.7vw;
-      display: grid;
-      grid-template-rows: auto auto minmax(0, 1fr);
-      gap: 1.6vh;
+      container-type: size;
+      position: relative;
+      width: min(100vw, calc(100vh * 1.6666667));
+      height: min(100vh, calc(100vw * 0.6));
+      aspect-ratio: 800 / 480;
+      background: var(--bg);
+      overflow: hidden;
     }
+    .frame, .header, .overview-card, .quota-card, .system-panel {
+      position: absolute;
+      background: var(--panel);
+      border: 0.1875vmin solid var(--line);
+    }
+    .frame { left: 1.125%; top: 1.875%; width: 97.75%; height: 96.25%; border-radius: 1.042%; }
     .header {
+      left: 2.25%; top: 3.542%; width: 95.5%; height: 7.5%;
+      border-radius: 0.833%;
       display: flex;
-      justify-content: space-between;
-      align-items: flex-start;
-      gap: 2vw;
+      align-items: center;
+      padding: 0 1.25%;
     }
-    .title {
-      font-size: clamp(26px, 3.4vw, 54px);
-      font-weight: 900;
-      line-height: 1.06;
-      letter-spacing: 0.02em;
-    }
-    .subtitle {
-      margin-top: 0.55vh;
-      font-size: clamp(14px, 1.5vw, 24px);
-      color: #222222;
-    }
+    .title { font-size: 5vmin; font-weight: 700; line-height: 1; }
     .refresh {
-      padding-top: 0.8vh;
-      font-size: clamp(13px, 1.4vw, 24px);
+      position: absolute;
+      left: 50%;
+      transform: translateX(-50%);
+      font-size: 3.333vmin;
+      font-weight: 600;
+      color: #444444;
       white-space: nowrap;
     }
-    .overview-grid {
-      display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: 1.2vw;
-      min-height: 0;
-    }
-    .card, .panel {
-      background: var(--panel);
-      border: 1.5px solid rgba(17, 17, 17, 0.45);
-      border-radius: var(--radius);
-    }
-    .card {
-      padding: 1.4vh 1.1vw 1vh;
-      display: flex;
-      flex-direction: column;
-      min-height: 0;
-    }
-    .card-top {
-      display: grid;
-      grid-template-columns: auto minmax(0, 1fr);
-      gap: 1vw;
-      align-items: start;
-    }
-    .icon-box {
-      width: clamp(52px, 5.5vw, 82px);
-      height: clamp(52px, 5.5vw, 82px);
-      border: 1.5px solid var(--line);
-      border-radius: 12px;
-      display: flex;
+    .badge {
+      margin-left: auto;
+      display: inline-flex;
       align-items: center;
       justify-content: center;
-      flex-shrink: 0;
-    }
-    .icon-box svg {
-      width: 70%;
-      height: 70%;
-      stroke: #111111;
-      fill: none;
-      stroke-width: 1.9;
-      stroke-linecap: round;
-      stroke-linejoin: round;
-    }
-    .card-title {
-      font-size: clamp(14px, 1.5vw, 24px);
-      line-height: 1.25;
-      margin-top: 0.2vh;
-    }
-    .card-value {
-      margin-top: 0.35vh;
-      font-size: clamp(30px, 4vw, 66px);
-      font-weight: 900;
-      line-height: 1.02;
-      letter-spacing: -0.04em;
-      white-space: nowrap;
-    }
-    .card-label {
-      margin-top: 0.4vh;
-      font-size: clamp(13px, 1.35vw, 22px);
-      color: #222222;
-    }
-    .card-stats {
-      margin-top: auto;
-      padding-top: 0.9vh;
-      border-top: 1px dotted rgba(17, 17, 17, 0.45);
-      display: flex;
-      justify-content: space-between;
-      gap: 0.8vw;
-      font-size: clamp(11px, 1.2vw, 20px);
-      flex-wrap: nowrap;
-    }
-    .card-stats span {
-      position: relative;
-      white-space: nowrap;
-      flex: 1 1 0;
-      text-align: center;
-    }
-    .card-stats span + span::before {
-      content: "";
-      position: absolute;
-      left: -0.4vw;
-      top: 0.15em;
-      width: 1px;
-      height: 1.1em;
-      background: rgba(17, 17, 17, 0.32);
-    }
-    .content-grid {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) minmax(0, 1.55fr) minmax(220px, 0.62fr);
-      gap: 1vw;
-      min-height: 0;
-    }
-    .panel {
-      padding: 1.1vh 0.9vw 0.8vh;
-      display: flex;
-      flex-direction: column;
-      min-height: 0;
-    }
-    .panel-header {
-      display: flex;
-      align-items: center;
-      gap: 0.7vw;
-      font-size: clamp(16px, 1.65vw, 27px);
-      margin-bottom: 0.8vh;
-    }
-    .panel-header svg {
-      width: clamp(20px, 2vw, 32px);
-      height: clamp(20px, 2vw, 32px);
-      stroke: #111111;
-      fill: none;
-      stroke-width: 1.9;
-      stroke-linecap: round;
-      stroke-linejoin: round;
-      flex-shrink: 0;
-    }
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      table-layout: fixed;
-      font-size: clamp(11px, 1.2vw, 18px);
-    }
-    th, td {
-      border: 1px solid rgba(17, 17, 17, 0.22);
-      padding: 0.7vh 0.55vw;
-      vertical-align: middle;
-      text-align: left;
-    }
-    th {
+      min-width: 11.25%;
+      height: 5vmin;
+      padding: 0 1.5%;
+      border-radius: 999px;
+      border: 0.125vmin solid var(--line);
+      font-size: 2.708vmin;
       font-weight: 700;
-      background: rgba(17, 17, 17, 0.02);
       white-space: nowrap;
     }
-    .table-wrap {
-      min-height: 0;
-      flex: 1 1 auto;
-      display: flex;
-      flex-direction: column;
-    }
-    .table-wrap table {
-      height: 100%;
-    }
-    .account-cell {
+    .badge.solid { background: var(--ink); color: var(--panel); }
+    .overview-card { top: 12.083%; width: 31%; height: 27.083%; padding: 2.292% 1.5% 0; }
+    .overview-card.claude { left: 2.25%; }
+    .overview-card.codex { left: 34.5%; }
+    .overview-card.total { left: 66.75%; }
+    .overview-title, .quota-title, .system-title {
+      font-size: 3.542vmin;
+      font-weight: 700;
+      line-height: 1;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
     }
-    .progress-cell {
-      display: flex;
-      align-items: center;
-      gap: 0.5vw;
-      min-width: 0;
+    .overview-value {
+      margin-top: 2.083%;
+      font-size: 11.25vmin;
+      font-weight: 700;
+      line-height: 1.08;
+      letter-spacing: -0.04em;
+      white-space: nowrap;
+      overflow: hidden;
     }
-    .progress-text {
-      width: 2.8em;
-      flex-shrink: 0;
+    .overview-divider {
+      position: absolute;
+      left: 4.839%; right: 4.839%; bottom: 6.458vmin;
+      border-top: 0.125vmin solid var(--soft-line);
+    }
+    .overview-cost {
+      position: absolute;
+      left: 4.839%; bottom: 2.5vmin;
+      font-size: 2.917vmin;
+      font-weight: 700;
+      color: var(--muted);
       white-space: nowrap;
     }
+    .quota-card { left: 2.25%; width: 63.25%; height: 28.125%; padding: 2.083% 1.5% 0; }
+    .quota-card.claude { top: 40.208%; }
+    .quota-card.codex { top: 69.375%; height: 28.75%; }
+    .quota-reset {
+      margin-top: 3.125%;
+      font-size: 2.708vmin;
+      font-weight: 700;
+      color: var(--muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .metric-row {
+      position: absolute;
+      left: 2.372%; right: 2.372%; top: 46.667%;
+      display: grid;
+      grid-template-columns: 190fr 25fr 230fr;
+      column-gap: 25px;
+      align-items: start;
+    }
+    .codex .metric-row { top: 45.652%; }
+    .metric { min-width: 0; }
+    .metric-head {
+      display: flex;
+      justify-content: space-between;
+      font-size: 3.75vmin;
+      font-weight: 700;
+      line-height: 1;
+    }
+    .progress-cell { margin-top: 2.292vmin; }
     .progress-track {
-      position: relative;
-      flex: 1 1 auto;
-      min-width: 0;
-      height: clamp(14px, 1.35vw, 20px);
-      border: 1.5px solid rgba(17, 17, 17, 0.55);
-      border-radius: 2px;
-      background: #ffffff;
+      width: 100%;
+      height: 1.875vmin;
+      border: 0.125vmin solid #bbbbbb;
+      border-radius: 999px;
       overflow: hidden;
     }
     .progress-fill {
-      height: 100%;
-      background-image: repeating-linear-gradient(-45deg, #111111 0, #111111 2px, #ffffff 2px, #ffffff 4px);
-      background-size: 8px 8px;
-      background-color: #111111;
+      height: calc(100% - 0.416vmin);
+      margin: 0.208vmin;
+      border-radius: 999px;
+      background: #333333;
     }
-    .status-badge {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      min-width: 4.6em;
-      padding: 0.34em 0.58em;
-      border-radius: 7px;
-      border: 1.5px solid #111111;
-      font-size: 0.94em;
-      white-space: nowrap;
-      background: #ffffff;
+    .metric-divider {
+      width: 0;
+      height: 8.958vmin;
+      border-left: 0.125vmin solid var(--soft-line);
+      margin: 0 auto;
     }
-    .status-badge.solid {
-      background: #111111;
-      color: #ffffff;
-    }
-    .table-footer {
-      margin-top: 0.65vh;
-      padding: 0 0.15vw;
-      font-size: clamp(10px, 1.05vw, 16px);
-      color: #2b2b2b;
-      display: flex;
-      justify-content: space-between;
-      gap: 0.8vw;
-      white-space: nowrap;
-    }
-    .alerts {
-      padding-left: 1.1em;
-      margin: 0.2vh 0 0;
-      font-size: clamp(12px, 1.25vw, 18px);
+    .system-panel { left: 66.75%; top: 40.208%; width: 31%; height: 57.917%; padding: 3.333% 2% 0; }
+    .system-alert-title, .system-alert-detail {
+      font-size: 3.125vmin;
+      font-weight: 700;
       line-height: 1.55;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
-    .alerts li + li {
-      margin-top: 0.7vh;
+    .system-alert-title { margin-top: 5.833%; }
+    .system-divider {
+      position: absolute;
+      left: 6.452%; right: 6.452%; bottom: 13.542%;
+      border-top: 0.125vmin solid var(--soft-line);
     }
-    .empty-note {
+    .refresh-dot {
+      position: absolute;
+      left: 8.065%; bottom: 9.375%;
+      width: 2.083vmin;
+      height: 2.083vmin;
+      border: 0.104vmin solid var(--muted);
+      border-radius: 50%;
+    }
+    .system-refresh {
+      position: absolute;
+      left: 16.129%; bottom: 8.958%;
+      font-size: 2.708vmin;
+      font-weight: 700;
       color: var(--muted);
-      font-size: clamp(12px, 1.15vw, 18px);
-      padding: 1.4vh 0.2vw;
-      line-height: 1.5;
-    }
-    .error-note {
-      color: #111111;
-      font-size: clamp(12px, 1.12vw, 17px);
-      line-height: 1.45;
-      padding: 1.2vh 0.2vw;
+      white-space: nowrap;
     }
   </style>
 </head>
 <body>
   <main class="page">
+    <div class="frame"></div>
     <header class="header">
-      <div>
-        <div class="title">AI 额度监控面板</div>
-        <div class="subtitle">Claude Code · Sub2API</div>
-      </div>
-      <div class="refresh">刷新时间 {{.UpdatedAt}}</div>
+      <div class="title">InfoHub</div>
+      <div class="refresh">{{.UpdatedAt}}</div>
+      <div class="badge solid">状态 正常</div>
     </header>
 
-    <section class="overview-grid">
-      {{range .Overview}}
-      <article class="card">
-        <div class="card-top">
-          <div class="icon-box">{{.Icon}}</div>
-          <div>
-            <div class="card-title">{{.Title}}</div>
-            <div class="card-value">{{.Value}}</div>
-            <div class="card-label">{{.Label}}</div>
-          </div>
+    <article class="overview-card claude">
+      <div class="overview-title">Claude</div>
+      <div class="overview-value">{{.Device.Claude.DisplayValue}}</div>
+      <div class="overview-divider"></div>
+      <div class="overview-cost">${{.Device.Claude.Cost}}</div>
+    </article>
+    <article class="overview-card codex">
+      <div class="overview-title">Codex</div>
+      <div class="overview-value">{{.Device.Codex.DisplayValue}}</div>
+      <div class="overview-divider"></div>
+      <div class="overview-cost">${{.Device.Codex.Cost}}</div>
+    </article>
+    <article class="overview-card total">
+      <div class="overview-title">合计</div>
+      <div class="overview-value">{{.Device.Total.DisplayValue}}</div>
+      <div class="overview-divider"></div>
+      <div class="overview-cost">${{.Device.Total.Cost}}</div>
+    </article>
+
+    <article class="quota-card claude">
+      <div class="quota-title">Claude 配额</div>
+      <div class="quota-reset">{{.ClaudeTable.FiveHourReset}}</div>
+      <div class="metric-row">
+        <div class="metric">
+          <div class="metric-head"><span>5H</span><span>{{.ClaudeTable.FocusRow.FiveHour.Text}}</span></div>
+          <div class="progress-cell"><div class="progress-track"><div class="progress-fill" style="width: {{.ClaudeTable.FocusRow.FiveHour.Percent}}%"></div></div></div>
         </div>
-        <div class="card-stats">
-          {{range .Stats}}<span>{{.}}</span>{{end}}
+        <div class="metric-divider"></div>
+        <div class="metric">
+          <div class="metric-head"><span>Week</span><span>{{.ClaudeTable.FocusRow.Week.Text}}</span></div>
+          <div class="progress-cell"><div class="progress-track"><div class="progress-fill" style="width: {{.ClaudeTable.FocusRow.Week.Percent}}%"></div></div></div>
         </div>
-      </article>
+      </div>
+    </article>
+
+    <article class="quota-card codex">
+      <div class="quota-title">Codex 配额</div>
+      <div class="quota-reset">{{.Sub2APITable.FiveHourReset}}</div>
+      <div class="metric-row">
+        <div class="metric">
+          <div class="metric-head"><span>5H</span><span>{{.Sub2APITable.FocusRow.FiveHour.Text}}</span></div>
+          <div class="progress-cell"><div class="progress-track"><div class="progress-fill" style="width: {{.Sub2APITable.FocusRow.FiveHour.Percent}}%"></div></div></div>
+        </div>
+        <div class="metric-divider"></div>
+        <div class="metric">
+          <div class="metric-head"><span>Week</span><span>{{.Sub2APITable.FocusRow.Week.Text}}</span></div>
+          <div class="progress-cell"><div class="progress-track"><div class="progress-fill" style="width: {{.Sub2APITable.FocusRow.Week.Percent}}%"></div></div></div>
+        </div>
+      </div>
+    </article>
+
+    <aside class="system-panel">
+      <div class="system-title">告警</div>
+      {{if .AlertTitle}}
+      <div class="system-alert-title">{{.AlertTitle}}</div>
+      <div class="system-alert-detail">{{.AlertDetail}}</div>
+      {{else}}
+      <div class="system-alert-title">暂无告警</div>
       {{end}}
-    </section>
-
-    <section class="content-grid">
-      <section class="panel">
-        <div class="panel-header">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17 20H7a2 2 0 0 1-2-2c0-3.3 3.1-6 7-6s7 2.7 7 6a2 2 0 0 1-2 2Z"/><circle cx="12" cy="7" r="4"/></svg>
-          <span>{{.ClaudeTable.Title}}</span>
-        </div>
-        {{if .ClaudeTable.ErrorText}}
-        <div class="error-note">{{.ClaudeTable.ErrorText}}</div>
-        {{else if .ClaudeTable.HasRows}}
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th style="width: 19%;">账号</th>
-                <th style="width: 33%;">5H</th>
-                <th style="width: 30%;">Week</th>
-                <th style="width: 18%;">状态</th>
-              </tr>
-            </thead>
-            <tbody>
-              {{range .ClaudeTable.Rows}}
-              <tr>
-                <td class="account-cell" title="{{.Account}}">{{.Account}}</td>
-                <td>
-                  <div class="progress-cell">
-                    <span class="progress-text">{{.FiveHour.Text}}</span>
-                    <div class="progress-track"><div class="progress-fill" style="width: {{.FiveHour.Percent}}%"></div></div>
-                  </div>
-                </td>
-                <td>
-                  <div class="progress-cell">
-                    <span class="progress-text">{{.Week.Text}}</span>
-                    <div class="progress-track"><div class="progress-fill" style="width: {{.Week.Percent}}%"></div></div>
-                  </div>
-                </td>
-                <td><span class="status-badge {{.StatusClass}}">{{.Status}}</span></td>
-              </tr>
-              {{end}}
-            </tbody>
-          </table>
-        </div>
-        <div class="table-footer">
-          <span>{{.ClaudeTable.FiveHourReset}}</span>
-          <span>{{.ClaudeTable.WeekReset}}</span>
-        </div>
-        {{else}}
-        <div class="empty-note">当前还没有 Claude Relay 额度数据。</div>
-        {{end}}
-      </section>
-
-      <section class="panel">
-        <div class="panel-header">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 18a4 4 0 0 1 0-8c.2 0 .5 0 .7.1A5.5 5.5 0 1 1 18 12h-1"/><path d="M8.5 18.5v2"/><path d="M12 16.5v4"/><path d="M15.5 18.5v2"/><circle cx="8.5" cy="20.5" r=".7" fill="#111111"/><circle cx="12" cy="20.5" r=".7" fill="#111111"/><circle cx="15.5" cy="20.5" r=".7" fill="#111111"/></svg>
-          <span>{{.Sub2APITable.Title}}</span>
-        </div>
-        {{if .Sub2APITable.ErrorText}}
-        <div class="error-note">{{.Sub2APITable.ErrorText}}</div>
-        {{else if .Sub2APITable.HasRows}}
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th style="width: 31%;">账号</th>
-                <th style="width: 29%;">5H</th>
-                <th style="width: 29%;">Week</th>
-                <th style="width: 11%;">状态</th>
-              </tr>
-            </thead>
-            <tbody>
-              {{range .Sub2APITable.Rows}}
-              <tr>
-                <td class="account-cell" title="{{.Account}}">{{.Account}}</td>
-                <td>
-                  <div class="progress-cell">
-                    <span class="progress-text">{{.FiveHour.Text}}</span>
-                    <div class="progress-track"><div class="progress-fill" style="width: {{.FiveHour.Percent}}%"></div></div>
-                  </div>
-                </td>
-                <td>
-                  <div class="progress-cell">
-                    <span class="progress-text">{{.Week.Text}}</span>
-                    <div class="progress-track"><div class="progress-fill" style="width: {{.Week.Percent}}%"></div></div>
-                  </div>
-                </td>
-                <td><span class="status-badge {{.StatusClass}}">{{.Status}}</span></td>
-              </tr>
-              {{end}}
-            </tbody>
-          </table>
-        </div>
-        {{else}}
-        <div class="empty-note">当前还没有 Sub2API 额度数据。</div>
-        {{end}}
-      </section>
-
-      <aside class="panel">
-        <div class="panel-header">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 17H5.5a1.5 1.5 0 0 1-1.2-2.4l1.4-1.8V10a5.3 5.3 0 1 1 10.6 0v2.8l1.4 1.8a1.5 1.5 0 0 1-1.2 2.4H15"/><path d="M9.5 18.5a2 2 0 0 0 4 0"/></svg>
-          <span>重点提醒</span>
-        </div>
-        {{if .Alerts}}
-        <ul class="alerts">
-          {{range .Alerts}}<li>{{.}}</li>{{end}}
-        </ul>
-        {{else}}
-        <div class="empty-note">暂无异常提醒，当前额度状态稳定。</div>
-        {{end}}
-      </aside>
-    </section>
+      <div class="system-divider"></div>
+      <div class="refresh-dot"></div>
+      <div class="system-refresh">刷新周期 {{.RefreshSeconds}}s</div>
+    </aside>
   </main>
 </body>
 </html>`))
@@ -449,6 +297,9 @@ type einkDashboardPage struct {
 	ClaudeTable    einkQuotaTable     `json:"claude_table"`
 	Sub2APITable   einkQuotaTable     `json:"sub2api_table"`
 	Alerts         []string           `json:"alerts"`
+	AlertTitle     string             `json:"alert_title"`
+	AlertDetail    string             `json:"alert_detail"`
+	Device         einkDevicePayload  `json:"device"`
 }
 
 type einkOverviewCard struct {
@@ -463,6 +314,7 @@ type einkOverviewCard struct {
 type einkQuotaTable struct {
 	Title         string         `json:"title"`
 	Rows          []einkQuotaRow `json:"rows"`
+	FocusRow      einkQuotaRow   `json:"focus_row"`
 	HasRows       bool           `json:"has_rows"`
 	ErrorText     string         `json:"error_text,omitempty"`
 	FiveHourReset string         `json:"five_hour_reset"`
@@ -485,6 +337,7 @@ type einkPercentCell struct {
 type einkDeviceOverview struct {
 	Title        string `json:"title"`
 	Value        string `json:"value"`
+	DisplayValue string `json:"display_value"`
 	Label        string `json:"label"`
 	Requests     int    `json:"requests"`
 	Cost         string `json:"cost"`
@@ -564,6 +417,8 @@ func buildEInkDashboardPage(snapshots map[string]model.SourceSnapshot, refreshSe
 	totalOverview := buildTotalOverview(claudeOverview, subOverview, claudeCritical+subCritical)
 	alerts := append([]string{}, subAlerts...)
 	alerts = append(alerts, claudeAlerts...)
+	alertTitle, alertDetail := splitDashboardAlert(alerts)
+	device := buildEInkDevicePayload(snapshots, refreshSeconds)
 
 	return einkDashboardPage{
 		UpdatedAt:      formatHeaderTime(updatedAtUnix),
@@ -577,6 +432,9 @@ func buildEInkDashboardPage(snapshots map[string]model.SourceSnapshot, refreshSe
 		ClaudeTable:  claudeTable,
 		Sub2APITable: subTable,
 		Alerts:       alerts,
+		AlertTitle:   alertTitle,
+		AlertDetail:  alertDetail,
+		Device:       device,
 	}
 }
 
@@ -599,6 +457,7 @@ func buildEInkDevicePayload(snapshots map[string]model.SourceSnapshot, refreshSe
 		Claude: einkDeviceOverview{
 			Title:        claudeOverview.Card.Title,
 			Value:        claudeOverview.Card.Value,
+			DisplayValue: formatTokenMillions(claudeOverview.TokenValue),
 			Label:        claudeOverview.Card.Label,
 			Requests:     int(math.Round(claudeOverview.Requests)),
 			Cost:         fmt.Sprintf("%.2f", claudeOverview.Cost),
@@ -608,6 +467,7 @@ func buildEInkDevicePayload(snapshots map[string]model.SourceSnapshot, refreshSe
 		Codex: einkDeviceOverview{
 			Title:        codexOverview.Card.Title,
 			Value:        codexOverview.Card.Value,
+			DisplayValue: formatTokenMillions(codexOverview.TokenValue),
 			Label:        codexOverview.Card.Label,
 			Requests:     int(math.Round(codexOverview.Requests)),
 			Cost:         fmt.Sprintf("%.2f", codexOverview.Cost),
@@ -617,6 +477,7 @@ func buildEInkDevicePayload(snapshots map[string]model.SourceSnapshot, refreshSe
 		Total: einkDeviceOverview{
 			Title:        "今日合计",
 			Value:        formatPrimaryNumber(totalToken),
+			DisplayValue: formatTokenMillions(totalToken),
 			Label:        "总 Token",
 			Requests:     totalRequests,
 			Cost:         fmt.Sprintf("%.2f", totalCost),
@@ -702,6 +563,7 @@ func buildSourceDashboard(sourceKey string, title string, snapshot model.SourceS
 			}
 		}
 	}
+	table.FocusRow = pickFocusQuotaRow(table.Rows)
 
 	return overview, table, criticalCount, alerts
 }
@@ -821,6 +683,51 @@ func buildQuotaRow(account quotaAccount) einkQuotaRow {
 		Status:      status,
 		StatusClass: className,
 	}
+}
+
+func pickFocusQuotaRow(rows []einkQuotaRow) einkQuotaRow {
+	if len(rows) == 0 {
+		return emptyQuotaRow()
+	}
+
+	selected := rows[0]
+	for _, row := range rows[1:] {
+		currentSeverity := quotaRowSeverity(row)
+		selectedSeverity := quotaRowSeverity(selected)
+		if currentSeverity > selectedSeverity || currentSeverity == selectedSeverity && quotaRowFloor(row) < quotaRowFloor(selected) {
+			selected = row
+		}
+	}
+	return selected
+}
+
+func emptyQuotaRow() einkQuotaRow {
+	return einkQuotaRow{
+		Account:  "--",
+		FiveHour: einkPercentCell{Percent: 0, Text: "--"},
+		Week:     einkPercentCell{Percent: 0, Text: "--"},
+		Status:   "--",
+	}
+}
+
+func quotaRowSeverity(row einkQuotaRow) int {
+	switch {
+	case row.Week.Percent == 0:
+		return 5
+	case row.FiveHour.Percent <= 20 || row.Week.Percent <= 10:
+		return 4
+	case row.FiveHour.Percent <= 50 || row.Week.Percent <= 50 || strings.Contains(row.Status, "关注"):
+		return 3
+	default:
+		return 1
+	}
+}
+
+func quotaRowFloor(row einkQuotaRow) int {
+	if row.FiveHour.Percent < row.Week.Percent {
+		return row.FiveHour.Percent
+	}
+	return row.Week.Percent
 }
 
 func quotaStatus(account quotaAccount) (string, string) {
@@ -953,6 +860,27 @@ func formatPrimaryNumber(value float64) string {
 		return formatInt64(int64(math.Round(value)))
 	}
 	return strings.TrimRight(strings.TrimRight(fmt.Sprintf("%.2f", value), "0"), ".")
+}
+
+func formatTokenMillions(value float64) string {
+	if value <= 0 {
+		return "--"
+	}
+	tenths := int64(math.Round(value / 100000))
+	return fmt.Sprintf("%d.%dM", tenths/10, tenths%10)
+}
+
+func splitDashboardAlert(alerts []string) (string, string) {
+	if len(alerts) == 0 {
+		return "", ""
+	}
+	alert := alerts[0]
+	for _, separator := range []string{"：", ":"} {
+		if index := strings.Index(alert, separator); index >= 0 {
+			return strings.TrimSpace(alert[:index]), strings.TrimSpace(alert[index+len(separator):])
+		}
+	}
+	return alert, ""
 }
 
 func formatCompactWhole(value float64) string {
