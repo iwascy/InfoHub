@@ -1,10 +1,12 @@
 # InfoHub
 
+[中文文档](README_CN.md)
+
 API quota aggregation service with e-ink dashboard. Collects usage metrics from multiple AI service providers on a schedule, persists snapshots, and exposes REST APIs plus a visual dashboard optimized for e-paper displays.
 
 ## Features
 
-- **Multi-source collection** -- pluggable collectors for Claude Relay, Sub2API, and Feishu, with a simple interface to add more
+- **Multi-source collection** -- pluggable collectors for Claude Relay, Sub2API, Feishu, and generic HTTP/JSON sources, with a simple interface to add more
 - **Scheduled & on-demand** -- cron-based periodic collection with manual trigger support
 - **Dual storage** -- SQLite for production, in-memory for development and testing
 - **E-ink dashboard** -- responsive HTML dashboard with progress bars and alerts, designed for 7.5" e-paper displays
@@ -198,6 +200,8 @@ See [`docs/`](docs/) for detailed setup guides:
 - [First Flash Runbook](docs/infohub-eink-first-flash-runbook.md)
 - [Direct API Panel](docs/infohub-eink-direct-api-panel.md)
 - [Deploy & Display Tuning](docs/infohub-eink-deploy-and-display-tuning.md)
+- [ESPHome Docker on macOS](docs/infohub-eink-esphome-docker-mac.md)
+- [Partial Refresh Probe](docs/infohub-eink-partial-refresh-probe.md)
 
 ### ESPHome Commands
 
@@ -227,4 +231,4 @@ go test ./internal/collector/... -v   # Verbose collector tests
 
 ## License
 
-MIT
+[MIT](LICENSE)
