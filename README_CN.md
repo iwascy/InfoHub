@@ -1,6 +1,6 @@
 # InfoHub
 
-[English](README.md)
+[English](README_EN.md)
 
 API 配额聚合服务，带有电子墨水屏仪表盘。定时从多个 AI 服务商采集用量指标，持久化快照数据，并提供 REST API 和专为电子墨水屏优化的可视化仪表盘。
 
@@ -195,13 +195,13 @@ InfoHub 通过 ESPHome 提供完整的电子纸屏支持：
 - **显示模式**：HTML 仪表盘（截图方式）或设备 JSON 端点
 - **刷新方式**：定时自动刷新 + GPIO 按钮手动刷新
 
-详细配置指南请参阅 [`docs/`](docs/) 目录：
+详细配置指南请参阅 [`docs/zh/`](docs/zh/) 目录：
 
-- [首次刷机指南](docs/infohub-eink-first-flash-runbook.md)
-- [直连 API 面板](docs/infohub-eink-direct-api-panel.md)
-- [部署与显示调优](docs/infohub-eink-deploy-and-display-tuning.md)
-- [macOS 上的 ESPHome Docker](docs/infohub-eink-esphome-docker-mac.md)
-- [局部刷新探测](docs/infohub-eink-partial-refresh-probe.md)
+- [首次刷机指南](docs/zh/infohub-eink-first-flash-runbook.md)
+- [直连 API 面板](docs/zh/infohub-eink-direct-api-panel.md)
+- [部署与显示调优](docs/zh/infohub-eink-deploy-and-display-tuning.md)
+- [macOS 上的 ESPHome Docker](docs/zh/infohub-eink-esphome-docker-mac.md)
+- [局部刷新探测](docs/zh/infohub-eink-partial-refresh-probe.md)
 
 ### ESPHome 命令
 

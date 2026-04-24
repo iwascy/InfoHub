@@ -1,8 +1,8 @@
 # InfoHub EInk 直连 API 面板说明
 
 > 当前文档对应第 2 阶段业务面板。
-> 第一次 USB 首刷请先走 [reTerminal E1001 首刷 Runbook](/Users/cyan/code/collect-server/docs/infohub-eink-first-flash-runbook.md)，确认设备、屏幕和 OTA 基础链路没问题后，再切到这里。
-> 当前更推荐的编译/管理入口是 [Mac 上独立 ESPHome Docker 方案](/Users/cyan/code/collect-server/docs/infohub-eink-esphome-docker-mac.md)。
+> 第一次 USB 首刷请先走 [reTerminal E1001 首刷 Runbook](./infohub-eink-first-flash-runbook.md)，确认设备、屏幕和 OTA 基础链路没问题后，再切到这里。
+> 当前更推荐的编译/管理入口是 [Mac 上独立 ESPHome Docker 方案](./infohub-eink-esphome-docker-mac.md)。
 
 这份方案是当前推荐路径的第 2 阶段：`reTerminal E1001 + ESPHome` 直接请求当前项目提供的设备接口。
 
@@ -24,7 +24,7 @@
 ## 当前仓库里对应的文件
 
 - 设备接口：`GET /dashboard/eink/device.json`
-- ESPHome 模板：[reterminal_e1001_infohub_api.yaml](/Users/cyan/code/collect-server/deploy/esphome/reterminal_e1001_infohub_api.yaml)
+- ESPHome 模板：[reterminal_e1001_infohub_api.yaml](../../deploy/esphome/reterminal_e1001_infohub_api.yaml)
 
 ## 1. 先确认项目接口
 
@@ -49,7 +49,7 @@ curl "http://10.30.5.172:8080/dashboard/eink/device.json?token=YOUR_DASHBOARD_TO
 
 ## 2. ESPHome 设备走直连接口
 
-在你已经完成 Stage 1 首刷之后，再使用 [reterminal_e1001_infohub_api.yaml](/Users/cyan/code/collect-server/deploy/esphome/reterminal_e1001_infohub_api.yaml) 作为设备 YAML。
+在你已经完成 Stage 1 首刷之后，再使用 [reterminal_e1001_infohub_api.yaml](../../deploy/esphome/reterminal_e1001_infohub_api.yaml) 作为设备 YAML。
 
 这个模板的关键点：
 
@@ -74,7 +74,7 @@ esphome_ota_password: "YOUR_OTA_PASSWORD"
 infohub_eink_device_url: "http://10.30.5.172:8080/dashboard/eink/device.json?token=YOUR_DASHBOARD_TOKEN&refresh=300"
 ```
 
-你也可以直接从 [deploy/esphome/secrets.example.yaml](/Users/cyan/code/collect-server/deploy/esphome/secrets.example.yaml) 复制示例，再填入真实值。
+你也可以直接从 [deploy/esphome/secrets.example.yaml](../../deploy/esphome/secrets.example.yaml) 复制示例，再填入真实值。
 
 ### 省电版轮询策略
 
@@ -112,7 +112,7 @@ infohub_eink_device_url: "http://10.30.5.172:8080/dashboard/eink/device.json?tok
 - 满电拔电后一小段时间里仍被判成“插电”
 - 或者边充边用但电压还没抬到阈值时，切换不够快
 
-可以直接微调 [reterminal_e1001_infohub_api.yaml](/Users/cyan/code/collect-server/deploy/esphome/reterminal_e1001_infohub_api.yaml) 顶部这两个 substitution：
+可以直接微调 [reterminal_e1001_infohub_api.yaml](../../deploy/esphome/reterminal_e1001_infohub_api.yaml) 顶部这两个 substitution：
 
 - `plugged_voltage_threshold`
 - `battery_voltage_threshold`
@@ -144,7 +144,7 @@ infohub_eink_device_url: "http://10.30.5.172:8080/dashboard/eink/device.json?tok
 
 ## 4. 推荐的部署顺序
 
-1. 先完成 [reTerminal E1001 首刷 Runbook](/Users/cyan/code/collect-server/docs/infohub-eink-first-flash-runbook.md)，确认最小固件已 USB 刷入并且屏幕能亮字
+1. 先完成 [reTerminal E1001 首刷 Runbook](./infohub-eink-first-flash-runbook.md)，确认最小固件已 USB 刷入并且屏幕能亮字
 2. 启动并确认 `collect-server` 的 `device.json` 可以访问
 3. 把设备 YAML 切换成 API 直连版
 4. 通过 OTA 更新设备，而不是重新走 USB 刷机
@@ -153,7 +153,7 @@ infohub_eink_device_url: "http://10.30.5.172:8080/dashboard/eink/device.json?tok
 7. 如果 `esphome config` 失败，先优先检查 Wi-Fi fallback 名称长度、`font.glyphs` 是否有重复字符，以及是否缺少根级 `json:` 组件
 
 如果你准备进一步验证硬件级 partial refresh，不要直接拿业务面板硬切显示型号，先走独立探针固件：
-[reTerminal E1001 局部刷新验证方案](/Users/cyan/code/collect-server/docs/infohub-eink-partial-refresh-probe.md)
+[reTerminal E1001 局部刷新验证方案](./infohub-eink-partial-refresh-probe.md)
 
 ## 5. 如果还要继续省电
 

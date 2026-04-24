@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mkdir -p /Users/cyan/code/collect-server/docs/zh /Users/cyan/code/collect-server/docs/en)",
+      "Bash(mv /Users/cyan/code/collect-server/docs/infohub-eink-*.md /Users/cyan/code/collect-server/docs/zh/)",
+      "Bash(grep -v '^\\\\S*:\\\\s*cd \\\\|/Users/cyan/code/collect-server/$\\\\|Cannot connect\\\\|^\\\\S*:\\\\s*#')"
+    ]
+  }
+}

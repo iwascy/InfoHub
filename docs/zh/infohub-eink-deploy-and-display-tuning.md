@@ -55,9 +55,9 @@ Mac Studio
 - `deploy/esphome/secrets.example.yaml`
 - `deploy/esphome/reterminal_e1001_first_flash_alt.yaml`
 - `deploy/esphome/reterminal_e1001_infohub_api.yaml`
-- `docs/infohub-eink-esphome-docker-mac.md`
-- `docs/infohub-eink-first-flash-runbook.md`
-- `docs/infohub-eink-direct-api-panel.md`
+- `docs/zh/infohub-eink-esphome-docker-mac.md`
+- `docs/zh/infohub-eink-first-flash-runbook.md`
+- `docs/zh/infohub-eink-direct-api-panel.md`
 - `docs/mockups/reterminal-e1001-ui-v7.svg`
 
 其中两份最关键的固件配置是：
@@ -390,6 +390,6 @@ Stage 2 过程中，除了接口问题，还处理过几类配置问题：
 
 ## 相关文档
 
-- 细化的 Docker 方案：`docs/infohub-eink-esphome-docker-mac.md`
-- 细化的首刷 runbook：`docs/infohub-eink-first-flash-runbook.md`
-- 细化的 API 直连说明：`docs/infohub-eink-direct-api-panel.md`
+- 细化的 Docker 方案：`docs/zh/infohub-eink-esphome-docker-mac.md`
+- 细化的首刷 runbook：`docs/zh/infohub-eink-first-flash-runbook.md`
+- 细化的 API 直连说明：`docs/zh/infohub-eink-direct-api-panel.md`

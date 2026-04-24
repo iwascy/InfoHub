@@ -3,7 +3,7 @@
 这份 runbook 对应当前主线方案的第 1 阶段：先把 `reTerminal E1001` 稳定刷成可 OTA 的 ESPHome 设备，再切换到 InfoHub 业务面板。
 
 当前推荐走 Mac 本机独立 Docker 方案：
-[Mac 上独立 ESPHome Docker 方案](/Users/cyan/code/collect-server/docs/infohub-eink-esphome-docker-mac.md)
+[Mac 上独立 ESPHome Docker 方案](./infohub-eink-esphome-docker-mac.md)
 
 目标只有 4 个：
 
@@ -12,14 +12,14 @@
 3. 看到电子纸屏正常显示
 4. 让设备通过 Wi-Fi 出现在 ESPHome Dashboard 里
 
-等这 4 件事完成，再切到 API 直连面板：[infohub-eink-direct-api-panel.md](/Users/cyan/code/collect-server/docs/infohub-eink-direct-api-panel.md)
+等这 4 件事完成，再切到 API 直连面板：[infohub-eink-direct-api-panel.md](./infohub-eink-direct-api-panel.md)
 
 ## 已确认的硬件结论
 
 2026-04-22 在当前这台 `reTerminal E1001` 上，首刷测试已经得到明确结论：
 
 - 标准 `7.50inv2` 配置刷入后会出现全白屏
-- 改用 [reterminal_e1001_first_flash_alt.yaml](/Users/cyan/code/collect-server/deploy/esphome/reterminal_e1001_first_flash_alt.yaml) 后，屏幕可以正常显示
+- 改用 [reterminal_e1001_first_flash_alt.yaml](../../deploy/esphome/reterminal_e1001_first_flash_alt.yaml) 后，屏幕可以正常显示
 - 当前设备后续所有业务 YAML 都应沿用同一套显示初始化参数：
   `model: 7.50inv2alt` + `reset_duration: 2ms`
 
@@ -30,7 +30,7 @@
 首刷拆成两阶段：
 
 - 第 1 阶段只验证硬件、USB、编译、Wi-Fi、ESPHome 在线
-- 第 2 阶段才加载 [reterminal_e1001_infohub_api.yaml](/Users/cyan/code/collect-server/deploy/esphome/reterminal_e1001_infohub_api.yaml) 做 API 拉取和页面排版
+- 第 2 阶段才加载 [reterminal_e1001_infohub_api.yaml](../../deploy/esphome/reterminal_e1001_infohub_api.yaml) 做 API 拉取和页面排版
 
 这样排障面会小很多。
 
@@ -49,9 +49,9 @@
 本仓库已经准备好首刷用文件：
 
 - 推荐首刷 YAML（当前设备已验证可用）：
-  [reterminal_e1001_first_flash_alt.yaml](/Users/cyan/code/collect-server/deploy/esphome/reterminal_e1001_first_flash_alt.yaml)
+  [reterminal_e1001_first_flash_alt.yaml](../../deploy/esphome/reterminal_e1001_first_flash_alt.yaml)
 - secrets 示例：
-  [secrets.example.yaml](/Users/cyan/code/collect-server/deploy/esphome/secrets.example.yaml)
+  [secrets.example.yaml](../../deploy/esphome/secrets.example.yaml)
 
 > 仓库里还有一份 `reterminal_e1001_first_flash.yaml`（标准 `7.50inv2`），但当前这台设备用它会白屏，不要使用。
 
@@ -80,10 +80,10 @@ openssl rand -hex 16
 
 推荐做法：
 
-1. 按 [Mac 上独立 ESPHome Docker 方案](/Users/cyan/code/collect-server/docs/infohub-eink-esphome-docker-mac.md) 启动本地 `ESPHome Dashboard`
+1. 按 [Mac 上独立 ESPHome Docker 方案](./infohub-eink-esphome-docker-mac.md) 启动本地 `ESPHome Dashboard`
 2. 打开 `http://localhost:6052`
 3. 新建或编辑设备
-4. 当前这台设备优先粘贴 [reterminal_e1001_first_flash_alt.yaml](/Users/cyan/code/collect-server/deploy/esphome/reterminal_e1001_first_flash_alt.yaml)
+4. 当前这台设备优先粘贴 [reterminal_e1001_first_flash_alt.yaml](../../deploy/esphome/reterminal_e1001_first_flash_alt.yaml)
 5. 保存
 6. 通过 Dashboard 触发安装，优先选择生成 `factory` 固件的下载流程
 
@@ -129,7 +129,7 @@ openssl rand -hex 16
 
 确认 Stage 1 没问题后，再把设备 YAML 切换到：
 
-- [reterminal_e1001_infohub_api.yaml](/Users/cyan/code/collect-server/deploy/esphome/reterminal_e1001_infohub_api.yaml)
+- [reterminal_e1001_infohub_api.yaml](../../deploy/esphome/reterminal_e1001_infohub_api.yaml)
 
 然后在 `secrets.yaml` 里补上：
 
@@ -144,7 +144,7 @@ Stage 2 再验证这些业务目标：
 3. 之后改走 OTA，而不是重复 USB 刷机
 
 如果你想继续确认这块屏是否支持硬件级局部刷新，建议不要直接在业务 YAML 上冒险，先刷独立探针：
-[reTerminal E1001 局部刷新验证方案](/Users/cyan/code/collect-server/docs/infohub-eink-partial-refresh-probe.md)
+[reTerminal E1001 局部刷新验证方案](./infohub-eink-partial-refresh-probe.md)
 
 ## 6. 常见故障怎么切分
 
@@ -193,6 +193,6 @@ Stage 1 文案显示本身不依赖网络，”全白”是显示初始化参数
 
 ## 7. 相关文件
 
-- 推荐首刷配置：[reterminal_e1001_first_flash_alt.yaml](/Users/cyan/code/collect-server/deploy/esphome/reterminal_e1001_first_flash_alt.yaml)
-- 业务面板配置：[reterminal_e1001_infohub_api.yaml](/Users/cyan/code/collect-server/deploy/esphome/reterminal_e1001_infohub_api.yaml)
-- API 直连说明：[infohub-eink-direct-api-panel.md](/Users/cyan/code/collect-server/docs/infohub-eink-direct-api-panel.md)
+- 推荐首刷配置：[reterminal_e1001_first_flash_alt.yaml](../../deploy/esphome/reterminal_e1001_first_flash_alt.yaml)
+- 业务面板配置：[reterminal_e1001_infohub_api.yaml](../../deploy/esphome/reterminal_e1001_infohub_api.yaml)
+- API 直连说明：[infohub-eink-direct-api-panel.md](./infohub-eink-direct-api-panel.md)

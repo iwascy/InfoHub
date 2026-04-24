@@ -1,35 +1,35 @@
 # InfoHub
 
-[中文文档](README_CN.md)
+[English](README_EN.md)
 
-API quota aggregation service with e-ink dashboard. Collects usage metrics from multiple AI service providers on a schedule, persists snapshots, and exposes REST APIs plus a visual dashboard optimized for e-paper displays.
+API 配额聚合服务，带有电子墨水屏仪表盘。定时从多个 AI 服务商采集用量指标，持久化快照数据，并提供 REST API 和专为电子墨水屏优化的可视化仪表盘。
 
-## Features
+## 功能特性
 
-- **Multi-source collection** -- pluggable collectors for Claude Relay, Sub2API, Feishu, and generic HTTP/JSON sources, with a simple interface to add more
-- **Scheduled & on-demand** -- cron-based periodic collection with manual trigger support
-- **Dual storage** -- SQLite for production, in-memory for development and testing
-- **E-ink dashboard** -- responsive HTML dashboard with progress bars and alerts, designed for 7.5" e-paper displays
-- **Device integration** -- JSON endpoints for ESPHome devices and Home Assistant embedding
-- **Flexible auth** -- Bearer token, login/JWT flow, or no-auth per collector
+- **多源采集** -- 内置 Claude Relay、Sub2API、飞书及通用 HTTP/JSON 采集器，可轻松扩展
+- **定时与手动** -- 基于 Cron 的定时采集，支持手动触发
+- **双存储后端** -- 生产环境使用 SQLite，开发和测试使用内存存储
+- **电子墨水屏仪表盘** -- 响应式 HTML 仪表盘，带进度条和告警，专为 7.5 英寸电子纸屏设计
+- **设备集成** -- 提供 ESPHome 设备和 Home Assistant 嵌入的 JSON 端点
+- **灵活认证** -- 支持 Bearer Token、登录/JWT 流程，或按采集器配置免认证
 
-## Quick Start
+## 快速开始
 
-### Prerequisites
+### 前置要求
 
 - Go 1.24+
-- (Optional) Docker for containerized deployment
+- （可选）Docker，用于容器化部署
 
-### Build & Run
+### 构建与运行
 
 ```bash
-# Build
+# 构建
 make build
 
-# Run with config
+# 使用配置文件运行
 make run
 
-# Or directly
+# 或直接运行
 ./bin/infohub -config config.yaml
 ```
 
@@ -43,13 +43,13 @@ docker run -p 8080:8080 \
   infohub
 ```
 
-## Configuration
+## 配置
 
-InfoHub uses YAML configuration with environment variable interpolation (`${VAR_NAME}`).
+InfoHub 使用 YAML 配置文件，支持环境变量插值（`${VAR_NAME}`）。
 
 ```yaml
 server:
-  port: ${INFOHUB_PORT}               # default: 8080
+  port: ${INFOHUB_PORT}               # 默认: 8080
   auth_token: "${INFOHUB_AUTH_TOKEN}"
   dashboard_token: "${INFOHUB_DASHBOARD_TOKEN}"
   read_timeout_seconds: 10
@@ -88,41 +88,41 @@ collectors:
         password: "${SUB2API_ADMIN_PASSWORD}"
 
 store:
-  type: "${INFOHUB_STORE_TYPE}"        # "sqlite" or "memory"
+  type: "${INFOHUB_STORE_TYPE}"        # "sqlite" 或 "memory"
   sqlite_path: "./data/infohub.db"
 
 log:
   level: "info"                        # debug | info | warn | error
 ```
 
-### Environment Variables
+### 环境变量
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `INFOHUB_PORT` | HTTP server port | `8080` |
-| `INFOHUB_AUTH_TOKEN` | API authentication token | -- |
-| `INFOHUB_DASHBOARD_TOKEN` | Dashboard access token (separate from API auth) | -- |
-| `INFOHUB_STORE_TYPE` | Storage backend: `sqlite` or `memory` | `memory` |
-| `INFOHUB_SQLITE_PATH` | SQLite database file path | `./data/infohub.db` |
-| `INFOHUB_LOG_LEVEL` | Log verbosity | `info` |
+| 变量名 | 说明 | 默认值 |
+|--------|------|--------|
+| `INFOHUB_PORT` | HTTP 服务端口 | `8080` |
+| `INFOHUB_AUTH_TOKEN` | API 认证令牌 | -- |
+| `INFOHUB_DASHBOARD_TOKEN` | 仪表盘访问令牌（与 API 认证独立） | -- |
+| `INFOHUB_STORE_TYPE` | 存储后端：`sqlite` 或 `memory` | `memory` |
+| `INFOHUB_SQLITE_PATH` | SQLite 数据库文件路径 | `./data/infohub.db` |
+| `INFOHUB_LOG_LEVEL` | 日志级别 | `info` |
 
-## API Reference
+## API 参考
 
-All API endpoints require `Authorization: Bearer <auth_token>` header.
+所有 API 端点需要 `Authorization: Bearer <auth_token>` 请求头。
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/api/v1/summary` | All source snapshots with latest data items |
-| `GET` | `/api/v1/source/{name}` | Specific source snapshot |
-| `GET` | `/api/v1/health` | Collector status and last fetch timestamps |
-| `POST` | `/api/v1/collect/{name}` | Manually trigger a collector |
-| `GET` | `/dashboard/eink` | HTML e-ink dashboard |
-| `GET` | `/dashboard/eink.json` | Dashboard data as JSON |
-| `GET` | `/dashboard/eink/device.json` | Device-optimized JSON payload |
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| `GET` | `/api/v1/summary` | 所有数据源的最新快照和数据项 |
+| `GET` | `/api/v1/source/{name}` | 指定数据源的快照 |
+| `GET` | `/api/v1/health` | 采集器状态和最近采集时间 |
+| `POST` | `/api/v1/collect/{name}` | 手动触发指定采集器 |
+| `GET` | `/dashboard/eink` | HTML 电子墨水屏仪表盘 |
+| `GET` | `/dashboard/eink.json` | 仪表盘数据（JSON 格式） |
+| `GET` | `/dashboard/eink/device.json` | 设备优化的 JSON 数据 |
 
-Dashboard endpoints accept the token via query parameter (`?token=xxx`) or header.
+仪表盘端点支持通过查询参数（`?token=xxx`）或请求头传递令牌。
 
-### Response Examples
+### 响应示例
 
 **GET /api/v1/summary**
 
@@ -160,25 +160,25 @@ Dashboard endpoints accept the token via query parameter (`?token=xxx`) or heade
 }
 ```
 
-## Architecture
+## 项目结构
 
 ```
-cmd/infohub/          Entry point, server bootstrap
+cmd/infohub/          程序入口，服务启动
 internal/
-  api/                HTTP handlers, middleware, dashboard rendering
-  collector/          Collector interface + implementations
-  config/             YAML config with env var expansion
-  model/              Data models (DataItem, SourceSnapshot)
-  scheduler/          Cron-based task scheduling
-  store/              Storage interface (SQLite, in-memory)
+  api/                HTTP 处理器、中间件、仪表盘渲染
+  collector/          采集器接口及实现
+  config/             YAML 配置与环境变量展开
+  model/              数据模型（DataItem、SourceSnapshot）
+  scheduler/          基于 Cron 的任务调度
+  store/              存储接口（SQLite、内存）
 deploy/
-  esphome/            ESPHome device configs for e-ink displays
-  homeassistant/      Home Assistant integration configs
+  esphome/            ESPHome 设备配置（电子墨水屏）
+  homeassistant/      Home Assistant 集成配置
 ```
 
-### Adding a Collector
+### 添加采集器
 
-Implement the `Collector` interface and register it in `cmd/infohub/main.go`:
+实现 `Collector` 接口并在 `cmd/infohub/main.go` 中注册：
 
 ```go
 type Collector interface {
@@ -187,48 +187,48 @@ type Collector interface {
 }
 ```
 
-## E-ink Display Integration
+## 电子墨水屏集成
 
-InfoHub includes first-class support for e-paper displays via ESPHome:
+InfoHub 通过 ESPHome 提供完整的电子纸屏支持：
 
-- **Target device**: reTerminal E1001 + Waveshare 7.5" e-paper
-- **Display modes**: HTML dashboard (via screenshot) or device JSON endpoint
-- **Refresh**: Automatic on schedule + GPIO button for manual refresh
+- **目标设备**：reTerminal E1001 + Waveshare 7.5 英寸电子纸屏
+- **显示模式**：HTML 仪表盘（截图方式）或设备 JSON 端点
+- **刷新方式**：定时自动刷新 + GPIO 按钮手动刷新
 
-See [`docs/`](docs/) for detailed setup guides:
+详细配置指南请参阅 [`docs/zh/`](docs/zh/) 目录：
 
-- [First Flash Runbook](docs/infohub-eink-first-flash-runbook.md)
-- [Direct API Panel](docs/infohub-eink-direct-api-panel.md)
-- [Deploy & Display Tuning](docs/infohub-eink-deploy-and-display-tuning.md)
-- [ESPHome Docker on macOS](docs/infohub-eink-esphome-docker-mac.md)
-- [Partial Refresh Probe](docs/infohub-eink-partial-refresh-probe.md)
+- [首次刷机指南](docs/zh/infohub-eink-first-flash-runbook.md)
+- [直连 API 面板](docs/zh/infohub-eink-direct-api-panel.md)
+- [部署与显示调优](docs/zh/infohub-eink-deploy-and-display-tuning.md)
+- [macOS 上的 ESPHome Docker](docs/zh/infohub-eink-esphome-docker-mac.md)
+- [局部刷新探测](docs/zh/infohub-eink-partial-refresh-probe.md)
 
-### ESPHome Commands
-
-```bash
-make esphome-up         # Start ESPHome container
-make esphome-compile-stage1   # Compile first-flash firmware
-make esphome-compile-stage2   # Compile production firmware
-make esphome-logs       # Stream ESPHome logs
-```
-
-## Development
+### ESPHome 命令
 
 ```bash
-make fmt      # Format code
-make test     # Run tests
-make tidy     # Tidy dependencies
+make esphome-up         # 启动 ESPHome 容器
+make esphome-compile-stage1   # 编译首次刷机固件
+make esphome-compile-stage2   # 编译生产固件
+make esphome-logs       # 查看 ESPHome 日志
 ```
 
-### Testing
+## 开发
 
-Tests use the standard `testing` package with `httptest` for HTTP mocking and in-memory storage for isolation.
+```bash
+make fmt      # 格式化代码
+make test     # 运行测试
+make tidy     # 整理依赖
+```
+
+### 测试
+
+测试使用标准 `testing` 包，通过 `httptest` 进行 HTTP 模拟，使用内存存储实现隔离。
 
 ```bash
 go test ./...
-go test ./internal/collector/... -v   # Verbose collector tests
+go test ./internal/collector/... -v   # 详细输出采集器测试
 ```
 
-## License
+## 许可证
 
 [MIT](LICENSE)

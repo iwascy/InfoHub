@@ -1,7 +1,7 @@
 # reTerminal E1001 局部刷新验证方案
 
 这份文档对应一份独立实验固件：
-[reterminal_e1001_partial_refresh_probe.yaml](/Users/cyan/code/collect-server/deploy/esphome/reterminal_e1001_partial_refresh_probe.yaml)
+[reterminal_e1001_partial_refresh_probe.yaml](../../deploy/esphome/reterminal_e1001_partial_refresh_probe.yaml)
 
 目标原本不是替换当前业务面板，而是用最小风险确认这台 `reTerminal E1001` 是否能在 ESPHome 下走硬件级 partial refresh。
 
@@ -16,7 +16,7 @@
 - 你愿意接受“这份实验 YAML 可能仍然白屏、花屏、整屏闪或者残影明显”
 
 如果你还没完成这些前提，请先走：
-[reTerminal E1001 首刷 Runbook](/Users/cyan/code/collect-server/docs/infohub-eink-first-flash-runbook.md)
+[reTerminal E1001 首刷 Runbook](./infohub-eink-first-flash-runbook.md)
 
 ## 这个探针固件做了什么
 
