@@ -2,6 +2,8 @@
 /.env
 /bin/
 /data/
+/dist/infohub
+/dist/infohub-release.tgz
 /infohub
 /deploy/esphome/.esphome/
 /deploy/esphome/secrets.yaml
