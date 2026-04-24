@@ -14,16 +14,26 @@ import (
 )
 
 type Handler struct {
-	store     store.Store
-	registry  *collector.Registry
-	scheduler *scheduler.Scheduler
+	store                store.Store
+	registry             *collector.Registry
+	scheduler            *scheduler.Scheduler
+	dashboardMockEnabled bool
 }
 
 func NewHandler(store store.Store, registry *collector.Registry, scheduler *scheduler.Scheduler) *Handler {
+	return NewHandlerWithOptions(store, registry, scheduler, HandlerOptions{})
+}
+
+type HandlerOptions struct {
+	DashboardMockEnabled bool
+}
+
+func NewHandlerWithOptions(store store.Store, registry *collector.Registry, scheduler *scheduler.Scheduler, options HandlerOptions) *Handler {
 	return &Handler{
-		store:     store,
-		registry:  registry,
-		scheduler: scheduler,
+		store:                store,
+		registry:             registry,
+		scheduler:            scheduler,
+		dashboardMockEnabled: options.DashboardMockEnabled,
 	}
 }
 

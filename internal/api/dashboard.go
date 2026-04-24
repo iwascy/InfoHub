@@ -373,6 +373,18 @@ type quotaMetric struct {
 }
 
 func (h *Handler) EInkDashboard(w http.ResponseWriter, r *http.Request) {
+	if h.dashboardMockEnabled {
+		page := buildMockEInkDashboardPage(dashboardRefreshSeconds(r))
+
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		if err := einkDashboardTmpl.Execute(w, page); err != nil {
+			writeDashboardError(w, http.StatusInternalServerError, err)
+			return
+		}
+		return
+	}
+
 	snapshots, err := h.store.GetAll()
 	if err != nil {
 		writeDashboardError(w, http.StatusInternalServerError, err)
@@ -390,6 +402,11 @@ func (h *Handler) EInkDashboard(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) EInkDashboardData(w http.ResponseWriter, r *http.Request) {
+	if h.dashboardMockEnabled {
+		writeJSON(w, http.StatusOK, buildMockEInkDashboardPage(dashboardRefreshSeconds(r)))
+		return
+	}
+
 	snapshots, err := h.store.GetAll()
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -400,6 +417,11 @@ func (h *Handler) EInkDashboardData(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) EInkDeviceData(w http.ResponseWriter, r *http.Request) {
+	if h.dashboardMockEnabled {
+		writeJSON(w, http.StatusOK, buildMockEInkDevicePayload(dashboardRefreshSeconds(r)))
+		return
+	}
+
 	snapshots, err := h.store.GetAll()
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -492,6 +514,132 @@ func buildEInkDevicePayload(snapshots map[string]model.SourceSnapshot, refreshSe
 			"claude_week":      claudeTable.WeekReset,
 			"codex_five_hour":  codexTable.FiveHourReset,
 			"codex_week":       codexTable.WeekReset,
+		},
+	}
+}
+
+func buildMockEInkDashboardPage(refreshSeconds int) einkDashboardPage {
+	device := buildMockEInkDevicePayload(refreshSeconds)
+	claudeTable := einkQuotaTable{
+		Title:         "Claude Relay 配额",
+		Rows:          device.ClaudeRows,
+		FocusRow:      device.ClaudeRows[0],
+		HasRows:       true,
+		FiveHourReset: device.ResetHints["claude_five_hour"],
+		WeekReset:     device.ResetHints["claude_week"],
+	}
+	codexTable := einkQuotaTable{
+		Title:         "Sub2API 账号额度",
+		Rows:          device.CodexRows,
+		FocusRow:      device.CodexRows[0],
+		HasRows:       true,
+		FiveHourReset: device.ResetHints["codex_five_hour"],
+		WeekReset:     device.ResetHints["codex_week"],
+	}
+
+	return einkDashboardPage{
+		UpdatedAt:      device.UpdatedAt,
+		UpdatedAtUnix:  device.UpdatedAtUnix,
+		RefreshSeconds: refreshSeconds,
+		Overview: []einkOverviewCard{
+			{
+				Kind:  "claude_relay",
+				Title: device.Claude.Title,
+				Value: device.Claude.Value,
+				Label: device.Claude.Label,
+				Stats: []string{"请求 14", "成本 $1.62", "启用 1"},
+				Icon:  dashboardCardIcon("claude_relay"),
+			},
+			{
+				Kind:  "sub2api",
+				Title: "Sub2API 今日概览",
+				Value: device.Codex.Value,
+				Label: device.Codex.Label,
+				Stats: []string{"请求 394", "成本 $13.55", "启用 5"},
+				Icon:  dashboardCardIcon("sub2api"),
+			},
+			{
+				Kind:  "total",
+				Title: device.Total.Title,
+				Value: device.Total.Value,
+				Label: device.Total.Label,
+				Stats: []string{"总请求 408", "总成本 $15.17", "告警 0"},
+				Icon:  dashboardCardIcon("total"),
+			},
+		},
+		ClaudeTable:  claudeTable,
+		Sub2APITable: codexTable,
+		Alerts:       []string{},
+		Device:       device,
+	}
+}
+
+func buildMockEInkDevicePayload(refreshSeconds int) einkDevicePayload {
+	return einkDevicePayload{
+		UpdatedAt:      "2026-04-24 10:30",
+		UpdatedAtUnix:  1776997800,
+		RefreshSeconds: refreshSeconds,
+		Claude: einkDeviceOverview{
+			Title:        "Claude Relay 今日概览",
+			Value:        "1,058,870",
+			DisplayValue: "1.1M",
+			Label:        "Token 用量",
+			Requests:     14,
+			Cost:         "1.62",
+			Enabled:      1,
+			ValueNumeric: 1058870,
+		},
+		Codex: einkDeviceOverview{
+			Title:        "Codex 今日概览",
+			Value:        "24,854,435",
+			DisplayValue: "24.9M",
+			Label:        "Token 用量",
+			Requests:     394,
+			Cost:         "13.55",
+			Enabled:      5,
+			ValueNumeric: 24854435,
+		},
+		Total: einkDeviceOverview{
+			Title:        "今日合计",
+			Value:        "25,913,305",
+			DisplayValue: "25.9M",
+			Label:        "总 Token",
+			Requests:     408,
+			Cost:         "15.17",
+			Alerts:       0,
+			ValueNumeric: 25913305,
+		},
+		ClaudeRows: []einkQuotaRow{
+			{
+				Account:     "cycyzg",
+				FiveHour:    einkPercentCell{Percent: 71, Text: "71%"},
+				Week:        einkPercentCell{Percent: 77, Text: "77%"},
+				Status:      "正常",
+				StatusClass: "",
+			},
+		},
+		CodexRows: []einkQuotaRow{
+			{
+				Account:     "admin10010",
+				FiveHour:    einkPercentCell{Percent: 56, Text: "56%"},
+				Week:        einkPercentCell{Percent: 92, Text: "92%"},
+				Status:      "关注",
+				StatusClass: "",
+			},
+			{
+				Account:     "admin10086",
+				FiveHour:    einkPercentCell{Percent: 18, Text: "18%"},
+				Week:        einkPercentCell{Percent: 64, Text: "64%"},
+				Status:      "正常",
+				StatusClass: "",
+			},
+		},
+		Alerts: []string{},
+		ResetHints: map[string]string{
+			"claude_five_hour": "5H 重置: 2026-04-24 15:00",
+			"claude_week":      "Week 重置: 2026-04-26 00:00",
+			"codex_five_hour":  "5H 重置: 2026-04-24 15:00",
+			"codex_week":       "Week 重置: 2026-04-27 08:00",
 		},
 	}
 }

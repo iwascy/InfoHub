@@ -244,7 +244,7 @@ func TestDashboardRouteUsesDedicatedToken(t *testing.T) {
 	dataStore := store.NewMemoryStore()
 	registry := collector.NewRegistry()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	router := NewRouter(dataStore, registry, nil, logger, "api-token", "view-token")
+	router := NewRouter(dataStore, registry, nil, logger, "api-token", "view-token", false)
 
 	t.Run("rejects missing dashboard token", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/dashboard/eink", nil)
@@ -548,6 +548,63 @@ func TestEInkDeviceDataReturnsCompactPayload(t *testing.T) {
 	}
 	if len(payload.Alerts) != 1 || payload.Alerts[0] != "Codex admin10010：5H 余量仅 56%" {
 		t.Fatalf("unexpected alerts: %+v", payload.Alerts)
+	}
+}
+
+func TestEInkDeviceDataReturnsMockPayloadWhenEnabled(t *testing.T) {
+	dataStore := store.NewMemoryStore()
+	if err := dataStore.Save("sub2api", []model.DataItem{
+		{
+			Source:    "sub2api",
+			Category:  "token_usage",
+			Title:     "今日 Token 用量",
+			Value:     "1",
+			FetchedAt: 1,
+		},
+	}); err != nil {
+		t.Fatalf("save failed: %v", err)
+	}
+
+	handler := NewHandlerWithOptions(dataStore, collector.NewRegistry(), nil, HandlerOptions{DashboardMockEnabled: true})
+	req := httptest.NewRequest(http.MethodGet, "/dashboard/eink/device.json?refresh=180", nil)
+	rec := httptest.NewRecorder()
+	handler.EInkDeviceData(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("unexpected status code: %d", rec.Code)
+	}
+
+	var payload struct {
+		UpdatedAtUnix  int64    `json:"updated_at_unix"`
+		RefreshSeconds int      `json:"refresh_seconds"`
+		Alerts         []string `json:"alerts"`
+		Codex          struct {
+			Value        string `json:"value"`
+			ValueNumeric int64  `json:"value_numeric"`
+		} `json:"codex"`
+		Total struct {
+			Alerts int `json:"alerts"`
+		} `json:"total"`
+		CodexRows []struct {
+			Account string `json:"account"`
+			Status  string `json:"status"`
+		} `json:"codex_rows"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response failed: %v", err)
+	}
+
+	if payload.UpdatedAtUnix != 1776997800 || payload.RefreshSeconds != 180 {
+		t.Fatalf("unexpected mock metadata: %+v", payload)
+	}
+	if payload.Codex.Value != "24,854,435" || payload.Codex.ValueNumeric != 24854435 {
+		t.Fatalf("unexpected mock codex payload: %+v", payload.Codex)
+	}
+	if payload.Total.Alerts != 0 || len(payload.Alerts) != 0 {
+		t.Fatalf("mock payload should not include alerts: %+v", payload)
+	}
+	if len(payload.CodexRows) != 2 || payload.CodexRows[1].Account != "admin10086" || payload.CodexRows[1].Status != "正常" {
+		t.Fatalf("unexpected mock codex rows: %+v", payload.CodexRows)
 	}
 }
 

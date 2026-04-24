@@ -34,6 +34,7 @@ type ServerConfig struct {
 	Port                   int    `yaml:"port"`
 	AuthToken              string `yaml:"auth_token"`
 	DashboardToken         string `yaml:"dashboard_token"`
+	MockEnabled            bool   `yaml:"mock_enabled"`
 	ReadTimeoutSeconds     int    `yaml:"read_timeout_seconds"`
 	WriteTimeoutSeconds    int    `yaml:"write_timeout_seconds"`
 	ShutdownTimeoutSeconds int    `yaml:"shutdown_timeout_seconds"`
