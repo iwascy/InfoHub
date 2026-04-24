@@ -1,6 +1,6 @@
 # InfoHub EInk（reTerminal E1001）部署与显示调优全记录
 
-这份文档把本次 `reTerminal E1001 + ESPHome + Home Assistant + InfoHub API` 的实际落地过程完整串起来，重点记录：
+这份文档把本次 `reTerminal E1001 + ESPHome + InfoHub API` 的实际落地过程完整串起来，重点记录：
 
 - 最终采用的主线方案
 - 目录结构和可执行命令
@@ -12,14 +12,13 @@
 
 ## 一页结论
 
-这次最终跑通的主线不是 `UTM + HAOS + ESPHome add-on`，而是：
+最终跑通的主线：
 
 1. `Mac Studio` 运行 `collect-server`
-2. `OrbStack Docker` 独立运行 `ESPHome Dashboard`
+2. `OrbStack Docker` 独立运行 `ESPHome Dashboard`（`http://localhost:6052`）
 3. 用浏览器 `web.esphome.io` 做第一次 USB 首刷
 4. 首刷成功后，切到业务固件并通过 OTA 更新
 5. 设备直接请求 `collect-server` 的 `/dashboard/eink/device.json`
-6. `Home Assistant` 负责设备发现和可选的 iframe 看板，不再承担主编译链路
 
 这条链路已经验证可用，当前设备能正常显示业务面板。
 
@@ -40,35 +39,16 @@ Mac Studio
 └── reTerminal E1001
     ├── Stage 1: 首刷诊断固件
     └── Stage 2: InfoHub API 面板固件
-
-Home Assistant
-├── Web: http://10.30.5.227:8123/
-└── 可选：挂 iframe 版 InfoHub dashboard
 ```
 
 主机侧当前已知地址：
 
 - `collect-server`：`http://10.30.5.172:8080`
-- `Home Assistant`：`http://10.30.5.227:8123`
 - `ESPHome Dashboard`：`http://localhost:6052`
-
-## 为什么改成这条主线
-
-前期阻塞主要集中在两类问题：
-
-- `HAOS + add-on` 编译链过长，排障面太大
-- `utmctl exec + docker exec` 在长时间编译场景下不稳定
-
-改成 `Mac + OrbStack + 独立 ESPHome Docker` 后，有几个明显好处：
-
-- 编译和 dashboard 管理由宿主机直接掌控
-- `factory` 固件可以稳定手动下载
-- 首刷和 OTA 可以分成两阶段排障
-- 即使 `Home Assistant` 暂时有问题，也不影响 ESPHome 编译和设备刷写
 
 ## 仓库内关键文件
 
-本次过程最终落到这些文件上：
+当前主线涉及这些文件：
 
 - `Makefile`
 - `deploy/esphome/docker/compose.yaml`
@@ -78,8 +58,7 @@ Home Assistant
 - `docs/infohub-eink-esphome-docker-mac.md`
 - `docs/infohub-eink-first-flash-runbook.md`
 - `docs/infohub-eink-direct-api-panel.md`
-- `docs/mockups/reterminal-e1001-ui-v3.svg`
-- `docs/mockups/reterminal-e1001-ui-v3.png`
+- `docs/mockups/reterminal-e1001-ui-v7.svg`
 
 其中两份最关键的固件配置是：
 
@@ -97,32 +76,22 @@ Home Assistant
 │       │   ├── compose.yaml
 │       │   └── .env.example
 │       ├── secrets.example.yaml
-│       ├── reterminal_e1001_first_flash.yaml
-│       ├── reterminal_e1001_first_flash_alt.yaml
-│       ├── reterminal_e1001_infohub.yaml
-│       └── reterminal_e1001_infohub_api.yaml
+│       ├── reterminal_e1001_first_flash_alt.yaml    # 首刷推荐
+│       ├── reterminal_e1001_infohub_api.yaml        # 业务固件
+│       └── reterminal_e1001_partial_refresh_probe.yaml
 └── docs/
     ├── infohub-eink-esphome-docker-mac.md
     ├── infohub-eink-first-flash-runbook.md
     ├── infohub-eink-direct-api-panel.md
     └── mockups/
-        ├── reterminal-e1001-ui-v2.svg
-        ├── reterminal-e1001-ui-v2.png
-        ├── reterminal-e1001-ui-v3.svg
-        └── reterminal-e1001-ui-v3.png
+        └── reterminal-e1001-ui-v7.svg
 ```
 
 ## 完整部署流程
 
-### 1. 选择 Docker 路线，而不是继续把 HA add-on 当主链路
+### 1. 使用独立 Docker 运行 ESPHome
 
-当前推荐做法：
-
-- 编译、管理 YAML、下载固件都走宿主机上的 `ESPHome Dashboard`
-- `Home Assistant` 只做接入和展示
-- 第一次刷机依赖浏览器 Web Serial
-
-不再建议把“HA add-on 是否能稳定长时间 compile”作为主阻塞点。
+编译、管理 YAML、下载固件都走宿主机上的 `ESPHome Dashboard`（`http://localhost:6052`），第一次刷机依赖浏览器 Web Serial。
 
 ### 2. 准备 secrets 和环境变量
 
@@ -209,19 +178,14 @@ http://localhost:6052
 
 根因不是 YAML 语法，而是 `ESP-IDF` 大量文件在 macOS 共享目录里复制时不稳定。
 
-最终稳定方案是：
+稳定方案：
 
-- `/config` 仍映射仓库里的 `deploy/esphome`
+- `/config` 映射仓库里的 `deploy/esphome`
 - `PlatformIO` 缓存走 Docker volume：`/cache`
 - 编译产物走 Docker volume：`/build`
 - CLI 编译直接复用已运行的 `infohub-esphome` 容器
 
-对应实现已经写进：
-
-- `deploy/esphome/docker/compose.yaml`
-- `Makefile`
-
-现在推荐使用：
+推荐使用：
 
 ```bash
 make DOCKER_CONTEXT=orbstack esphome-compile-stage1-alt
@@ -382,7 +346,7 @@ Stage 2 过程中，除了接口问题，还处理过几类配置问题：
 | 按键 | 当前行为 |
 | --- | --- |
 | `GPIO3` | 触发一次主动拉取 `fetch_dashboard_payload` |
-| HA 按钮 `Force Sync` | 触发一次主动拉取 `fetch_dashboard_payload` |
+| `Force Sync` 按钮 | 触发一次主动拉取 `fetch_dashboard_payload` |
 | `GPIO4` | 当前未绑定 |
 | `GPIO5` | 当前未绑定 |
 
@@ -394,35 +358,15 @@ Stage 2 过程中，除了接口问题，还处理过几类配置问题：
 
 ## 墨水屏显示优化过程
 
-后续在业务固件基础上又做了一轮版式优化，方向包括：
+业务固件已完成一轮版式优化：
 
 - Token 统一用 `M（百万）` 作为展示单位
-- 去掉“请求数”
-- 去掉“启动数”
+- 去掉”请求数”和”启动数”
 - 去掉配额卡片里的账户名
-- `Sub2API` 多账户按“合并统计”展示
+- `Sub2API` 多账户按”合并统计”展示
 - 字体整体做大，减少小号中文锯齿感
 
-这一轮先做了效果图，没有直接把最终版全量落进固件。
-
-当前确认的视觉稿路径：
-
-- `docs/mockups/reterminal-e1001-ui-v3.svg`
-- `docs/mockups/reterminal-e1001-ui-v3.png`
-
-这版视觉稿体现的方向包括：
-
-- 顶部保留刷新时间和整体状态
-- 三张总览卡片统一大数字
-- `Sub2API` 明确标注“合并统计”
-- 左侧为 Claude / Sub2API 配额区域
-- 右侧统一做“告警与系统”信息栏
-
-需要注意：
-
-- 当前 mockup `v3` 是“下一版 UI 方向”
-- 不应误认为已经全部上线到当前设备固件
-- 当前设备已经能正常显示，但业务固件上的 UI 仍是较早一版大字号优化稿
+当前视觉稿：`docs/mockups/reterminal-e1001-ui-v7.svg`
 
 ## 常见问题速查
 
@@ -438,49 +382,14 @@ Stage 2 过程中，除了接口问题，还处理过几类配置问题：
 
 ## 当前稳定配置结论
 
-到目前为止，已经确认的稳定结论有这些：
-
-- 主线路线应固定为 `Mac + OrbStack Docker + Web Serial + OTA`
-- 当前这台 `reTerminal E1001` 应统一使用：
-
-  ```yaml
-  model: 7.50inv2alt
-  reset_duration: 2ms
-  ```
-
-- 业务固件应请求：
-
-  ```text
-  /dashboard/eink/device.json
-  ```
-
-- `Home Assistant` 适合作为设备接入和辅助展示层，而不是主编译层
+- 主线路线：`Mac + OrbStack Docker + Web Serial + OTA`
+- 首刷配置使用 `7.50inv2alt + reset_duration: 2ms`
+- 业务固件已切到 `7.50inV2p + full_update_every: 15 + reset_duration: 2ms`（局部刷新已验证通过）
+- 业务固件请求 `/dashboard/eink/device.json`
 - `Force Sync` / `GPIO3` 是主动拉取，不是无条件整屏重绘
-
-## 现在的状态
-
-当前状态已经进入“主链路打通”阶段：
-
-- `ESPHome Docker` 方案已经跑通
-- `web.esphome.io` 首刷已经成功
-- `Stage 1 alt` 已确认能正常显示
-- `Stage 2` 业务固件已编译并刷入
-- 服务端鉴权已经修正
-- `secrets.yaml` 已更新为正确设备接口
-- 设备已经恢复正常显示
-
-## 后续可继续做的优化
-
-接下来如果继续迭代，优先顺序建议是：
-
-1. 把 `docs/mockups/reterminal-e1001-ui-v3.*` 的视觉稿正式落进业务固件
-2. 如果需要硬件按键扩展，再决定是否绑定 `GPIO4`、`GPIO5`
-3. 增加更多 HA 侧实体，方便在 HA 中看设备状态和手动触发同步
-4. 根据实际刷新体验，再微调轮询周期和文案密度
 
 ## 相关文档
 
 - 细化的 Docker 方案：`docs/infohub-eink-esphome-docker-mac.md`
 - 细化的首刷 runbook：`docs/infohub-eink-first-flash-runbook.md`
 - 细化的 API 直连说明：`docs/infohub-eink-direct-api-panel.md`
-- 2026-04-22 状态记录：`docs/infohub-eink-ha-status-2026-04-22.md`

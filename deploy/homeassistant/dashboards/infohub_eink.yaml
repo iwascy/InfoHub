@@ -1,9 +1,0 @@
-title: InfoHub EInk
-views:
-  - title: AI 额度监控
-    path: default_view
-    panel: true
-    cards:
-      - type: iframe
-        url: !secret infohub_eink_source_url
-        aspect_ratio: 60%

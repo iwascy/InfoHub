@@ -74,7 +74,7 @@
 2. 按硬件按键
 `GPIO3` 会手动推进一步。
 
-3. 在 ESPHome / HA 里点按钮
+3. 在 ESPHome Dashboard 里点按钮
 有两个模板按钮：
 - `Step`
 - `Reset Counter`
@@ -87,17 +87,11 @@
 4. 至少等到第 15 次更新，确认是否按预期发生一次全刷。
 5. 如果整体验证通过，再考虑把业务面板迁到同一显示模型。
 
-## 风险边界
+## 验证结果
 
-这份 probe 固件是实验用途，不建议直接替换业务屏长期运行。
+probe 已通过验证，业务固件已切到 `7.50inV2p + full_update_every: 15 + reset_duration: 2ms`。
 
-原因有两个：
-
-- 当前仓库里实际已验证稳定的型号仍然是 `7.50inv2alt`
-- 即使 `7.50inV2p` 能跑起来，也还需要继续验证长时间运行的残影、偶发错刷和恢复能力
-
-如果 probe 失败，直接刷回：
-[reterminal_e1001_infohub_api.yaml](/Users/cyan/code/collect-server/deploy/esphome/reterminal_e1001_infohub_api.yaml)
+如果后续需要回退，可以在业务 YAML 中把 `model` 改回 `7.50inv2alt` 并去掉 `full_update_every`。
 
 ## 参考资料
 

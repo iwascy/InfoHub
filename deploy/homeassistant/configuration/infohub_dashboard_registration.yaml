@@ -1,9 +1,0 @@
-lovelace:
-  dashboards:
-    infohub-eink:
-      mode: yaml
-      title: InfoHub EInk
-      icon: mdi:tablet-dashboard
-      show_in_sidebar: true
-      require_admin: true
-      filename: dashboards/infohub_eink.yaml

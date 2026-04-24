@@ -1,13 +1,11 @@
 # Mac 上独立 ESPHome Docker 方案
 
-这套方案的目标是把 `ESPHome` 从 `Home Assistant OS` 虚机里拆出来，直接跑在 `Mac Studio` 的 Docker Desktop 上。
+这套方案在 `Mac Studio` 的 Docker Desktop 上独立运行 `ESPHome`，用于编译固件和管理设备。
 
-这样做的好处很直接：
+核心优势：
 
-- 编译链不再依赖 `UTM + HAOS + add-on`
-- `ESPHome Dashboard` 独立可用，出问题更容易定位
-- 设备仍然可以继续接入 `Home Assistant`
-- 当前的 `reTerminal E1001` 业务面板本来就是直接拉项目 API，并不依赖 HA 截图链路
+- `ESPHome Dashboard` 独立可用，出问题容易定位
+- 设备直接拉项目 API，不依赖外部服务
 
 ## 适用边界
 
@@ -44,10 +42,9 @@
 │       │   ├── compose.yaml
 │       │   └── .env.example
 │       ├── secrets.example.yaml
-│       ├── reterminal_e1001_first_flash.yaml
 │       ├── reterminal_e1001_first_flash_alt.yaml
 │       ├── reterminal_e1001_infohub_api.yaml
-│       └── .esphome/              # 编译缓存，已加入 .gitignore
+│       └── reterminal_e1001_partial_refresh_probe.yaml
 └── docs/
     ├── infohub-eink-first-flash-runbook.md
     └── infohub-eink-direct-api-panel.md
@@ -57,15 +54,15 @@
 
 - [compose.yaml](/Users/cyan/code/collect-server/deploy/esphome/docker/compose.yaml) 负责启动本地 `ESPHome Dashboard`
 - [secrets.example.yaml](/Users/cyan/code/collect-server/deploy/esphome/secrets.example.yaml) 是设备侧 secrets 模板
-- [reterminal_e1001_first_flash.yaml](/Users/cyan/code/collect-server/deploy/esphome/reterminal_e1001_first_flash.yaml) 用于第 1 阶段首刷
-- [reterminal_e1001_first_flash_alt.yaml](/Users/cyan/code/collect-server/deploy/esphome/reterminal_e1001_first_flash_alt.yaml) 是当前这台 E1001 已验证可亮屏的首刷配置
-- [reterminal_e1001_infohub_api.yaml](/Users/cyan/code/collect-server/deploy/esphome/reterminal_e1001_infohub_api.yaml) 用于第 2 阶段业务面板
+- [reterminal_e1001_first_flash_alt.yaml](/Users/cyan/code/collect-server/deploy/esphome/reterminal_e1001_first_flash_alt.yaml) 首刷配置（`7.50inv2alt`，已验证可亮屏）
+- [reterminal_e1001_infohub_api.yaml](/Users/cyan/code/collect-server/deploy/esphome/reterminal_e1001_infohub_api.yaml) 业务面板（`7.50inV2p`，支持局部刷新）
+- [reterminal_e1001_partial_refresh_probe.yaml](/Users/cyan/code/collect-server/deploy/esphome/reterminal_e1001_partial_refresh_probe.yaml) 局部刷新探针（已验证通过）
 
 注意：
 
-- `/config` 仍然映射到仓库里的 `deploy/esphome`
-- `PlatformIO` 包缓存会走容器卷 `/cache`
-- 编译产物会走容器卷 `/build`
+- `/config` 映射到仓库里的 `deploy/esphome`
+- `PlatformIO` 包缓存走容器卷 `/cache`
+- 编译产物走容器卷 `/build`
 
 这样可以避开 OrbStack/macOS 共享目录在处理 `ESP-IDF` 大量文件时的复制失败问题。
 
@@ -219,12 +216,7 @@ cd /Users/cyan/code/collect-server
 make DOCKER_CONTEXT=orbstack esphome-compile-stage2
 ```
 
-这两条命令的目标是：
-
-- 先在 Mac 上确认编译链正常
-- 不再依赖 `UTM + docker exec`
-
-这里的 CLI 编译会直接在已经运行的 `infohub-esphome` 容器里执行，并显式复用镜像里的 `/entrypoint.sh`。
+CLI 编译会直接在已经运行的 `infohub-esphome` 容器里执行，并显式复用镜像里的 `/entrypoint.sh`。
 这样可以避免多个容器并发写同一套 `PlatformIO` 缓存时出现包状态损坏。
 同时也能确保 `/cache` 和 `/build` 这些容器卷配置在 CLI 编译时同样生效。
 
@@ -303,5 +295,3 @@ NO_PROXY=localhost,127.0.0.1,10.30.5.0/24
 
 - ESPHome 官方命令行与 Docker 指南：
   [Getting Started with the Command Line and Docker](https://esphome.io/guides/getting_started_command_line/)
-- Home Assistant 官方安装方式说明：
-  [Home Assistant Installation](https://www.home-assistant.io/installation)
