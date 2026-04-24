@@ -82,11 +82,11 @@ font:
     id: font_header
     size: 24
     glyphs: ' 0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz%$.,:-_+/()[]#&!?@*=<>"''：刷新时间状态等待首次拉取数据解析失败请求成本启用告警总量今日合计余仅正常关注充足最佳耗尽重置暂无同步与系统概览配额显示按键周期点急低电量'
-  - file: "gfonts://Noto+Sans+SC@500"
+  - file: "gfonts://Noto+Sans+SC@700"
     id: font_time
     size: 16
     glyphs: ' 0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz%$.,:-_+/()[]#&!?@*=<>"''：刷新时间状态等待首次拉取数据解析失败请求成本启用告警总量今日合计余仅正常关注充足最佳耗尽重置暂无同步与系统概览配额显示按键周期点急低电量'
-  - file: "gfonts://Noto+Sans+SC@500"
+  - file: "gfonts://Noto+Sans+SC@700"
     id: font_label
     size: 17
     glyphs: ' 0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz%$.,:-_+/()[]#&!?@*=<>"''：刷新时间状态等待首次拉取数据解析失败请求成本启用告警总量今日合计余仅正常关注充足最佳耗尽重置暂无同步与系统概览配额显示按键周期点急低电量'
@@ -102,11 +102,11 @@ font:
     id: font_md
     size: 15
     glyphs: ' 0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz%$.,:-_+/()[]#&!?@*=<>"''：刷新时间状态等待首次拉取数据解析失败请求成本启用告警总量今日合计余仅正常关注充足最佳耗尽重置暂无同步与系统概览配额显示按键周期点急低电量'
-  - file: "gfonts://Noto+Sans+SC@500"
+  - file: "gfonts://Noto+Sans+SC@700"
     id: font_sm
     size: 14
     glyphs: ' 0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz%$.,:-_+/()[]#&!?@*=<>"''：刷新时间状态等待首次拉取数据解析失败请求成本启用告警总量今日合计余仅正常关注充足最佳耗尽重置暂无同步与系统概览配额显示按键周期点急低电量'
-  - file: "gfonts://Noto+Sans+SC@500"
+  - file: "gfonts://Noto+Sans+SC@700"
     id: font_xs
     size: 13
     glyphs: ' 0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz%$.,:-_+/()[]#&!?@*=<>"''：刷新时间状态等待首次拉取数据解析失败请求成本启用告警总量今日合计余仅正常关注充足最佳耗尽重置暂无同步与系统概览配额显示按键周期点急低电量'
@@ -172,19 +172,19 @@ globals:
     type: int
     restore_value: no
     initial_value: '0'
-  - id: sub2api_value_live
+  - id: codex_value_live
     type: std::string
     restore_value: no
     initial_value: '"--"'
-  - id: sub2api_cost_live
+  - id: codex_cost_live
     type: std::string
     restore_value: no
     initial_value: '"--"'
-  - id: sub2api_requests_live
+  - id: codex_requests_live
     type: int
     restore_value: no
     initial_value: '0'
-  - id: sub2api_enabled_live
+  - id: codex_enabled_live
     type: int
     restore_value: no
     initial_value: '0'
@@ -426,10 +426,10 @@ script:
                   int next_claude_requests = 0;
                   int next_claude_enabled = 0;
 
-                  std::string next_sub2api_value = "--";
-                  std::string next_sub2api_cost = "--";
-                  int next_sub2api_requests = 0;
-                  int next_sub2api_enabled = 0;
+                  std::string next_codex_value = "--";
+                  std::string next_codex_cost = "--";
+                  int next_codex_requests = 0;
+                  int next_codex_enabled = 0;
 
                   std::string next_total_value = "--";
                   std::string next_total_cost = "--";
@@ -445,13 +445,13 @@ script:
                     next_claude_requests = claude_obj["requests"] | 0;
                     next_claude_enabled = claude_obj["enabled"] | 0;
 
-                    JsonObject sub2api_obj = root["sub2api"];
-                    const char *sub2api_value = sub2api_obj["value"] | "--";
-                    const char *sub2api_cost = sub2api_obj["cost"] | "--";
-                    next_sub2api_value = sub2api_value != nullptr ? sub2api_value : "--";
-                    next_sub2api_cost = sub2api_cost != nullptr ? sub2api_cost : "--";
-                    next_sub2api_requests = sub2api_obj["requests"] | 0;
-                    next_sub2api_enabled = sub2api_obj["enabled"] | 0;
+                    JsonObject codex_obj = root["codex"];
+                    const char *codex_value = codex_obj["value"] | "--";
+                    const char *codex_cost = codex_obj["cost"] | "--";
+                    next_codex_value = codex_value != nullptr ? codex_value : "--";
+                    next_codex_cost = codex_cost != nullptr ? codex_cost : "--";
+                    next_codex_requests = codex_obj["requests"] | 0;
+                    next_codex_enabled = codex_obj["enabled"] | 0;
 
                     JsonObject total_obj = root["total"];
                     const char *total_value = total_obj["value"] | "--";
@@ -493,20 +493,20 @@ script:
                     metrics_changed = true;
                   }
 
-                  if (id(sub2api_value_live) != next_sub2api_value) {
-                    id(sub2api_value_live) = next_sub2api_value;
+                  if (id(codex_value_live) != next_codex_value) {
+                    id(codex_value_live) = next_codex_value;
                     metrics_changed = true;
                   }
-                  if (id(sub2api_cost_live) != next_sub2api_cost) {
-                    id(sub2api_cost_live) = next_sub2api_cost;
+                  if (id(codex_cost_live) != next_codex_cost) {
+                    id(codex_cost_live) = next_codex_cost;
                     metrics_changed = true;
                   }
-                  if (id(sub2api_requests_live) != next_sub2api_requests) {
-                    id(sub2api_requests_live) = next_sub2api_requests;
+                  if (id(codex_requests_live) != next_codex_requests) {
+                    id(codex_requests_live) = next_codex_requests;
                     metrics_changed = true;
                   }
-                  if (id(sub2api_enabled_live) != next_sub2api_enabled) {
-                    id(sub2api_enabled_live) = next_sub2api_enabled;
+                  if (id(codex_enabled_live) != next_codex_enabled) {
+                    id(codex_enabled_live) = next_codex_enabled;
                     metrics_changed = true;
                   }
 
@@ -908,20 +908,20 @@ display:
       };
 
       OverviewData claude = {"Claude", "--", 0, "--", 0, -1, 0};
-      OverviewData sub2api = {"Codex", "--", 0, "--", 0, -1, 0};
+      OverviewData codex = {"Codex", "--", 0, "--", 0, -1, 0};
       OverviewData total = {"合计", "--", 0, "--", 0, -1, 0};
 
       RowData claude_rows[2] = {{"--", -1, -1, "--"}, {"--", -1, -1, "--"}};
-      RowData sub2api_rows[2] = {{"--", -1, -1, "--"}, {"--", -1, -1, "--"}};
+      RowData codex_rows[2] = {{"--", -1, -1, "--"}, {"--", -1, -1, "--"}};
       int claude_row_count = 0;
-      int sub2api_row_count = 0;
+      int codex_row_count = 0;
 
       std::string alert_lines[3] = {"暂无告警", "", ""};
       int alert_count = 0;
 
       std::string updated_at = "--";
       std::string reset_claude = "--";
-      std::string reset_sub2api = "--";
+      std::string reset_codex = "--";
       int refresh_seconds = 0;
 
       auto format_token_m = [&](const OverviewData &item) -> std::string {
@@ -945,7 +945,7 @@ display:
         return "$" + cost;
       };
 
-      auto draw_overview_card = [&](const Rect &box, const std::string &title, const OverviewData &item, bool show_alerts) {
+      auto draw_overview_card = [&](const Rect &box, const std::string &title, const OverviewData &item) {
         std::string fitted_title = fit_text_width(id(font_label), title, box.w - 24);
         std::string value_m = format_token_m(item);
         std::string money_text = format_money(item.cost);
@@ -960,18 +960,6 @@ display:
         it.end_clipping();
 
         it.line(box.x + 12, divider_y, box.x + box.w - 12, divider_y);
-        if (show_alerts && item.alerts > 0) {
-          it.printf(
-            box.x + 12,
-            divider_y + 7,
-            id(font_sm),
-            "%s",
-            fit_text_width(id(font_sm), money_text, box.w - 104).c_str()
-          );
-          it.printf(box.x + box.w - 12, divider_y + 7, id(font_sm), TextAlign::TOP_RIGHT, "告警 %d", item.alerts);
-          return;
-        }
-
         it.printf(box.x + 12, divider_y + 7, id(font_sm), "%s", fit_text_width(id(font_sm), money_text, box.w - 24).c_str());
       };
 
@@ -1040,17 +1028,17 @@ display:
       };
 
       auto draw_quota_card = [&](const Rect &box, const std::string &title, const std::string &reset_text, const RowData &row, bool show_reset) {
-        int metric_top = box.y + (show_reset ? 52 : 39);
-        int track_y = box.y + (show_reset ? 78 : 63);
-        int divider_top = box.y + (show_reset ? 53 : 38);
-        int divider_bottom = box.y + (show_reset ? 94 : 79);
+        int metric_top = box.y + (show_reset ? 63 : 39);
+        int track_y = box.y + (show_reset ? 91 : 63);
+        int divider_top = box.y + (show_reset ? 64 : 38);
+        int divider_bottom = box.y + (show_reset ? 107 : 79);
         Rect five_track{box.x + 12, track_y, 190, 9};
         Rect week_track{box.x + 252, track_y, 230, 9};
 
         draw_outline_round_rect(box, 0);
         it.printf(box.x + 12, box.y + 10, id(font_title), "%s", fit_text_width(id(font_title), title, box.w - 24).c_str());
         if (show_reset) {
-          it.printf(box.x + 12, box.y + 32, id(font_xs), "%s", fit_text_width(id(font_xs), reset_text, box.w - 24).c_str());
+          it.printf(box.x + 12, box.y + 36, id(font_xs), "%s", fit_text_width(id(font_xs), reset_text, box.w - 24).c_str());
         }
 
         it.printf(box.x + 12, metric_top, id(font_metric), "5H");
@@ -1126,14 +1114,14 @@ display:
           claude.enabled = claude_obj["enabled"] | -1;
           claude.value_numeric = claude_obj["value_numeric"] | 0;
 
-          JsonObject sub2api_obj = root["sub2api"];
-          const char *sub_value = sub2api_obj["value"] | "--";
-          const char *sub_cost = sub2api_obj["cost"] | "--";
-          sub2api.value = sub_value != nullptr ? sub_value : "--";
-          sub2api.cost = sub_cost != nullptr ? sub_cost : "--";
-          sub2api.requests = sub2api_obj["requests"] | 0;
-          sub2api.enabled = sub2api_obj["enabled"] | -1;
-          sub2api.value_numeric = sub2api_obj["value_numeric"] | 0;
+          JsonObject codex_obj = root["codex"];
+          const char *codex_value = codex_obj["value"] | "--";
+          const char *codex_cost = codex_obj["cost"] | "--";
+          codex.value = codex_value != nullptr ? codex_value : "--";
+          codex.cost = codex_cost != nullptr ? codex_cost : "--";
+          codex.requests = codex_obj["requests"] | 0;
+          codex.enabled = codex_obj["enabled"] | -1;
+          codex.value_numeric = codex_obj["value_numeric"] | 0;
 
           JsonObject total_obj = root["total"];
           const char *total_value = total_obj["value"] | "--";
@@ -1156,14 +1144,14 @@ display:
             }
           }
 
-          JsonArray sub2api_array = root["sub2api_rows"].as<JsonArray>();
-          if (!sub2api_array.isNull()) {
-            for (JsonVariant row_var : sub2api_array) {
-              if (sub2api_row_count >= 2) {
+          JsonArray codex_array = root["codex_rows"].as<JsonArray>();
+          if (!codex_array.isNull()) {
+            for (JsonVariant row_var : codex_array) {
+              if (codex_row_count >= 2) {
                 break;
               }
-              load_row(row_var.as<JsonObject>(), sub2api_rows[sub2api_row_count]);
-              sub2api_row_count++;
+              load_row(row_var.as<JsonObject>(), codex_rows[codex_row_count]);
+              codex_row_count++;
             }
           }
 
@@ -1181,9 +1169,9 @@ display:
 
           JsonObject reset_obj = root["reset_hints"];
           const char *reset_claude_text = reset_obj["claude_five_hour"] | "--";
-          const char *reset_sub2api_text = reset_obj["sub2api_five_hour"] | "--";
+          const char *reset_codex_text = reset_obj["codex_five_hour"] | "--";
           reset_claude = reset_claude_text != nullptr ? reset_claude_text : "--";
-          reset_sub2api = reset_sub2api_text != nullptr ? reset_sub2api_text : "--";
+          reset_codex = reset_codex_text != nullptr ? reset_codex_text : "--";
           return true;
         });
       }
@@ -1202,10 +1190,10 @@ display:
       claude.requests = id(claude_requests_live);
       claude.enabled = id(claude_enabled_live);
 
-      sub2api.value = id(sub2api_value_live);
-      sub2api.cost = id(sub2api_cost_live);
-      sub2api.requests = id(sub2api_requests_live);
-      sub2api.enabled = id(sub2api_enabled_live);
+      codex.value = id(codex_value_live);
+      codex.cost = id(codex_cost_live);
+      codex.requests = id(codex_requests_live);
+      codex.enabled = id(codex_enabled_live);
 
       total.value = id(total_value_live);
       total.cost = id(total_cost_live);
@@ -1213,7 +1201,7 @@ display:
       total.alerts = id(total_alerts_live);
 
       RowData claude_focus = pick_focus_row(claude_rows, claude_row_count);
-      RowData sub2api_focus = pick_focus_row(sub2api_rows, sub2api_row_count);
+      RowData codex_focus = pick_focus_row(codex_rows, codex_row_count);
       std::string alert_title = "暂无告警";
       std::string alert_detail;
       if (alert_count > 0) {
@@ -1223,10 +1211,10 @@ display:
       Rect frame{9, 9, 782, 462};
       Rect header{18, 17, 764, 36};
       Rect overview_claude{18, 58, 248, 130};
-      Rect overview_sub2api{276, 58, 248, 130};
+      Rect overview_codex{276, 58, 248, 130};
       Rect overview_total{534, 58, 248, 130};
       Rect quota_claude{18, 193, 506, 135};
-      Rect quota_sub2api{18, 333, 506, 138};
+      Rect quota_codex{18, 333, 506, 138};
       Rect system_panel{534, 193, 248, 278};
       Rect failure_panel{18, 58, 764, 413};
 
@@ -1263,10 +1251,10 @@ display:
         return;
       }
 
-      draw_overview_card(overview_claude, "Claude", claude, false);
-      draw_overview_card(overview_sub2api, "Codex", sub2api, false);
-      draw_overview_card(overview_total, "合计", total, true);
+      draw_overview_card(overview_claude, "Claude", claude);
+      draw_overview_card(overview_codex, "Codex", codex);
+      draw_overview_card(overview_total, "合计", total);
 
-      draw_quota_card(quota_claude, "Claude 配额", reset_claude, claude_focus, false);
-      draw_quota_card(quota_sub2api, "Codex 配额", reset_sub2api, sub2api_focus, true);
+      draw_quota_card(quota_claude, "Claude 配额", reset_claude, claude_focus, true);
+      draw_quota_card(quota_codex, "Codex 配额", reset_codex, codex_focus, true);
       draw_system_panel(system_panel, alert_count, alert_title, alert_detail, refresh_seconds);

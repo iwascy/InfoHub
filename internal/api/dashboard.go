@@ -498,10 +498,10 @@ type einkDevicePayload struct {
 	UpdatedAtUnix  int64              `json:"updated_at_unix"`
 	RefreshSeconds int                `json:"refresh_seconds"`
 	Claude         einkDeviceOverview `json:"claude"`
-	Sub2API        einkDeviceOverview `json:"sub2api"`
+	Codex          einkDeviceOverview `json:"codex"`
 	Total          einkDeviceOverview `json:"total"`
 	ClaudeRows     []einkQuotaRow     `json:"claude_rows"`
-	Sub2APIRows    []einkQuotaRow     `json:"sub2api_rows"`
+	CodexRows      []einkQuotaRow     `json:"codex_rows"`
 	Alerts         []string           `json:"alerts"`
 	ResetHints     map[string]string  `json:"reset_hints"`
 }
@@ -583,13 +583,13 @@ func buildEInkDashboardPage(snapshots map[string]model.SourceSnapshot, refreshSe
 func buildEInkDevicePayload(snapshots map[string]model.SourceSnapshot, refreshSeconds int) einkDevicePayload {
 	updatedAtUnix := maxSnapshotDataUpdatedAt(snapshots)
 	claudeOverview, claudeTable, _, claudeAlerts := buildSourceDashboard("claude_relay", "Claude Relay 今日概览", snapshots["claude_relay"])
-	subOverview, subTable, _, subAlerts := buildSourceDashboard("sub2api", "Sub2API 今日概览", snapshots["sub2api"])
+	codexOverview, codexTable, _, codexAlerts := buildSourceDashboard("codex", "Codex 今日概览", snapshots["sub2api"])
 
-	totalToken := claudeOverview.TokenValue + subOverview.TokenValue
-	totalRequests := int(math.Round(claudeOverview.Requests + subOverview.Requests))
-	totalCost := claudeOverview.Cost + subOverview.Cost
+	totalToken := claudeOverview.TokenValue + codexOverview.TokenValue
+	totalRequests := int(math.Round(claudeOverview.Requests + codexOverview.Requests))
+	totalCost := claudeOverview.Cost + codexOverview.Cost
 
-	alerts := append([]string{}, subAlerts...)
+	alerts := append([]string{}, codexAlerts...)
 	alerts = append(alerts, claudeAlerts...)
 
 	return einkDevicePayload{
@@ -605,14 +605,14 @@ func buildEInkDevicePayload(snapshots map[string]model.SourceSnapshot, refreshSe
 			Enabled:      int(math.Round(claudeOverview.EnabledAccount)),
 			ValueNumeric: int64(math.Round(claudeOverview.TokenValue)),
 		},
-		Sub2API: einkDeviceOverview{
-			Title:        subOverview.Card.Title,
-			Value:        subOverview.Card.Value,
-			Label:        subOverview.Card.Label,
-			Requests:     int(math.Round(subOverview.Requests)),
-			Cost:         fmt.Sprintf("%.2f", subOverview.Cost),
-			Enabled:      int(math.Round(subOverview.EnabledAccount)),
-			ValueNumeric: int64(math.Round(subOverview.TokenValue)),
+		Codex: einkDeviceOverview{
+			Title:        codexOverview.Card.Title,
+			Value:        codexOverview.Card.Value,
+			Label:        codexOverview.Card.Label,
+			Requests:     int(math.Round(codexOverview.Requests)),
+			Cost:         fmt.Sprintf("%.2f", codexOverview.Cost),
+			Enabled:      int(math.Round(codexOverview.EnabledAccount)),
+			ValueNumeric: int64(math.Round(codexOverview.TokenValue)),
 		},
 		Total: einkDeviceOverview{
 			Title:        "今日合计",
@@ -623,14 +623,14 @@ func buildEInkDevicePayload(snapshots map[string]model.SourceSnapshot, refreshSe
 			Alerts:       len(alerts),
 			ValueNumeric: int64(math.Round(totalToken)),
 		},
-		ClaudeRows:  claudeTable.Rows,
-		Sub2APIRows: subTable.Rows,
-		Alerts:      alerts,
+		ClaudeRows: claudeTable.Rows,
+		CodexRows:  codexTable.Rows,
+		Alerts:     alerts,
 		ResetHints: map[string]string{
-			"claude_five_hour":  claudeTable.FiveHourReset,
-			"claude_week":       claudeTable.WeekReset,
-			"sub2api_five_hour": subTable.FiveHourReset,
-			"sub2api_week":      subTable.WeekReset,
+			"claude_five_hour": claudeTable.FiveHourReset,
+			"claude_week":      claudeTable.WeekReset,
+			"codex_five_hour":  codexTable.FiveHourReset,
+			"codex_week":       codexTable.WeekReset,
 		},
 	}
 }
@@ -749,6 +749,8 @@ func dashboardTableTitle(sourceKey string) string {
 	switch sourceKey {
 	case "claude_relay":
 		return "Claude Relay 配额"
+	case "codex":
+		return "Codex 账号额度"
 	case "sub2api":
 		return "Sub2API 账号额度"
 	default:
@@ -842,6 +844,8 @@ func buildAlert(account quotaAccount, sourceKey string) (string, bool, bool) {
 	displayName := account.Name
 	if sourceKey == "claude_relay" {
 		displayName = "Claude " + displayName
+	} else if sourceKey == "codex" {
+		displayName = "Codex " + displayName
 	}
 
 	switch {
@@ -1116,6 +1120,8 @@ func dashboardCardIcon(kind string) template.HTML {
 	case "claude_relay":
 		return template.HTML(`<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><rect x="7" y="7" width="10" height="10" rx="1.5"/><path d="M9.3 14.4v-4.8h2.2c1.6 0 2.6 1 2.6 2.4s-1 2.4-2.6 2.4H9.3Z"/><path d="M15.2 9.6v4.8"/></svg>`)
 	case "sub2api":
+		return template.HTML(`<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 18a4 4 0 0 1 0-8c.2 0 .5 0 .7.1A5.5 5.5 0 1 1 18 12h-1"/><path d="M8.5 18.5v2"/><path d="M12 16.5v4"/><path d="M15.5 18.5v2"/><circle cx="8.5" cy="20.5" r=".7" fill="#111111"/><circle cx="12" cy="20.5" r=".7" fill="#111111"/><circle cx="15.5" cy="20.5" r=".7" fill="#111111"/></svg>`)
+	case "codex":
 		return template.HTML(`<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 18a4 4 0 0 1 0-8c.2 0 .5 0 .7.1A5.5 5.5 0 1 1 18 12h-1"/><path d="M8.5 18.5v2"/><path d="M12 16.5v4"/><path d="M15.5 18.5v2"/><circle cx="8.5" cy="20.5" r=".7" fill="#111111"/><circle cx="12" cy="20.5" r=".7" fill="#111111"/><circle cx="15.5" cy="20.5" r=".7" fill="#111111"/></svg>`)
 	default:
 		return template.HTML(`<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h16"/><path d="M7 17V9"/><path d="M12 17V5"/><path d="M17 17v-7"/></svg>`)
