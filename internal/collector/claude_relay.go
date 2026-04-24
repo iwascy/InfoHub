@@ -66,7 +66,7 @@ func (c *ClaudeRelayCollector) Collect(ctx context.Context) ([]model.DataItem, e
 
 	for _, rawAccount := range accountList {
 		account, ok := rawAccount.(map[string]any)
-		if !ok || !claudeRelayAccountEnabled(account) {
+		if !ok || !claudeRelayAccountVisible(account) {
 			continue
 		}
 
@@ -142,15 +142,7 @@ func (c *ClaudeRelayCollector) Collect(ctx context.Context) ([]model.DataItem, e
 }
 
 func claudeRelayAccountEnabled(account map[string]any) bool {
-	isActive, ok := nestedValue(account, "isActive")
-	if ok {
-		if active, ok := boolValue(isActive); ok && !active {
-			return false
-		}
-	}
-
-	status := stringsEqualFold(firstString(account, "status"), "active")
-	if !status && firstString(account, "status") != "" {
+	if !claudeRelayAccountVisible(account) {
 		return false
 	}
 
@@ -158,6 +150,22 @@ func claudeRelayAccountEnabled(account map[string]any) bool {
 		if enabled, ok := boolValue(schedulable); ok && !enabled {
 			return false
 		}
+	}
+
+	return true
+}
+
+func claudeRelayAccountVisible(account map[string]any) bool {
+	isActive, ok := nestedValue(account, "isActive")
+	if ok {
+		if active, ok := boolValue(isActive); ok && !active {
+			return false
+		}
+	}
+
+	status := firstString(account, "status")
+	if stringsEqualFold(status, "inactive") || stringsEqualFold(status, "disabled") {
+		return false
 	}
 
 	return true

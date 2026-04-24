@@ -67,8 +67,8 @@ func TestClaudeRelayCollectorCollect(t *testing.T) {
 						"id":          "acct-2",
 						"name":        "beta",
 						"isActive":    true,
-						"status":      "active",
-						"schedulable": true,
+						"status":      "blocked",
+						"schedulable": false,
 						"usage": map[string]any{
 							"daily": map[string]any{
 								"allTokens": 800,
