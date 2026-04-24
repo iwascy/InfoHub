@@ -500,13 +500,20 @@ func TestEInkDeviceDataReturnsCompactPayload(t *testing.T) {
 			Cost     string `json:"cost"`
 			Alerts   int    `json:"alerts"`
 		} `json:"total"`
-		Sub2APIRows []struct {
+		Codex struct {
+			Value        string `json:"value"`
+			Requests     int    `json:"requests"`
+			Cost         string `json:"cost"`
+			Enabled      int    `json:"enabled"`
+			ValueNumeric int64  `json:"value_numeric"`
+		} `json:"codex"`
+		CodexRows []struct {
 			Account  string `json:"account"`
 			FiveHour struct {
 				Percent int `json:"percent"`
 			} `json:"five_hour"`
 			Status string `json:"status"`
-		} `json:"sub2api_rows"`
+		} `json:"codex_rows"`
 		Alerts []string `json:"alerts"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
@@ -525,13 +532,19 @@ func TestEInkDeviceDataReturnsCompactPayload(t *testing.T) {
 	if payload.Claude.ValueNumeric != 1058870 {
 		t.Fatalf("unexpected claude numeric payload: %+v", payload.Claude)
 	}
+	if payload.Codex.Value != "24,854,435" || payload.Codex.Requests != 394 || payload.Codex.Cost != "13.55" || payload.Codex.Enabled != 5 {
+		t.Fatalf("unexpected codex payload: %+v", payload.Codex)
+	}
+	if payload.Codex.ValueNumeric != 24854435 {
+		t.Fatalf("unexpected codex numeric payload: %+v", payload.Codex)
+	}
 	if payload.Total.Value != "25,913,305" || payload.Total.Requests != 408 || payload.Total.Cost != "15.17" || payload.Total.Alerts != 1 {
 		t.Fatalf("unexpected total payload: %+v", payload.Total)
 	}
-	if len(payload.Sub2APIRows) != 1 || payload.Sub2APIRows[0].Account != "admin10010" || payload.Sub2APIRows[0].FiveHour.Percent != 56 || payload.Sub2APIRows[0].Status != "关注" {
-		t.Fatalf("unexpected sub2api rows: %+v", payload.Sub2APIRows)
+	if len(payload.CodexRows) != 1 || payload.CodexRows[0].Account != "admin10010" || payload.CodexRows[0].FiveHour.Percent != 56 || payload.CodexRows[0].Status != "关注" {
+		t.Fatalf("unexpected codex rows: %+v", payload.CodexRows)
 	}
-	if len(payload.Alerts) != 1 || payload.Alerts[0] != "admin10010：5H 余量仅 56%" {
+	if len(payload.Alerts) != 1 || payload.Alerts[0] != "Codex admin10010：5H 余量仅 56%" {
 		t.Fatalf("unexpected alerts: %+v", payload.Alerts)
 	}
 }
@@ -589,16 +602,16 @@ func TestEInkDeviceDataKeepsLastSuccessfulSnapshotOnCollectorFailure(t *testing.
 
 	var payload struct {
 		UpdatedAtUnix int64 `json:"updated_at_unix"`
-		Sub2API       struct {
+		Codex         struct {
 			Value    string `json:"value"`
 			Requests int    `json:"requests"`
 			Cost     string `json:"cost"`
 			Enabled  int    `json:"enabled"`
-		} `json:"sub2api"`
-		Sub2APIRows []struct {
+		} `json:"codex"`
+		CodexRows []struct {
 			Account string `json:"account"`
 			Status  string `json:"status"`
-		} `json:"sub2api_rows"`
+		} `json:"codex_rows"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("decode response failed: %v", err)
@@ -607,11 +620,11 @@ func TestEInkDeviceDataKeepsLastSuccessfulSnapshotOnCollectorFailure(t *testing.
 	if payload.UpdatedAtUnix != 1776766339 {
 		t.Fatalf("unexpected updated_at_unix: %d", payload.UpdatedAtUnix)
 	}
-	if payload.Sub2API.Value != "24,854,435" || payload.Sub2API.Requests != 394 || payload.Sub2API.Cost != "13.55" || payload.Sub2API.Enabled != 5 {
-		t.Fatalf("unexpected cached sub2api payload: %+v", payload.Sub2API)
+	if payload.Codex.Value != "24,854,435" || payload.Codex.Requests != 394 || payload.Codex.Cost != "13.55" || payload.Codex.Enabled != 5 {
+		t.Fatalf("unexpected cached codex payload: %+v", payload.Codex)
 	}
-	if len(payload.Sub2APIRows) != 1 || payload.Sub2APIRows[0].Account != "admin10010" || payload.Sub2APIRows[0].Status != "关注" {
-		t.Fatalf("unexpected cached sub2api rows: %+v", payload.Sub2APIRows)
+	if len(payload.CodexRows) != 1 || payload.CodexRows[0].Account != "admin10010" || payload.CodexRows[0].Status != "关注" {
+		t.Fatalf("unexpected cached codex rows: %+v", payload.CodexRows)
 	}
 }
 
