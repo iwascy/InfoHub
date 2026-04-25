@@ -1,5 +1,7 @@
 # InfoHub
 
+![InfoHub Dashboard](docs/mockups/dashboard.png)
+
 [中文文档](README_CN.md)
 
 API quota aggregation service with e-ink dashboard. Collects usage metrics from multiple AI service providers on a schedule, persists snapshots, and exposes REST APIs plus a visual dashboard optimized for e-paper displays.

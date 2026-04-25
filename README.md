@@ -1,5 +1,7 @@
 # InfoHub
 
+![InfoHub 仪表盘](docs/mockups/dashboard.png)
+
 [English](README_EN.md)
 
 API 配额聚合服务，带有电子墨水屏仪表盘。定时从多个 AI 服务商采集用量指标，持久化快照数据，并提供 REST API 和专为电子墨水屏优化的可视化仪表盘。
