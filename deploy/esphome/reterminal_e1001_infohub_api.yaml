@@ -8,7 +8,9 @@ substitutions:
   device_name: reterminal-e1001-infohub
   friendly_name: reTerminal E1001 InfoHub
   plugged_poll_interval: 2min
-  battery_poll_interval: 5min
+  battery_poll_interval: 15min
+  battery_sensor_update_interval: 2min
+  power_profile_update_interval: 5min
   full_payload_sync_every: "6"
   time_zone: Asia/Shanghai
   battery_quiet_start_hour: "22"
@@ -24,6 +26,15 @@ esphome:
     - priority: 600
       then:
         - output.turn_on: bsp_battery_enable
+        - lambda: |-
+            esp_sleep_wakeup_cause_t wakeup_cause = esp_sleep_get_wakeup_cause();
+            if (wakeup_cause == ESP_SLEEP_WAKEUP_EXT0 ||
+                wakeup_cause == ESP_SLEEP_WAKEUP_EXT1 ||
+                wakeup_cause == ESP_SLEEP_WAKEUP_GPIO) {
+              id(manual_wake_refresh_requested) = true;
+              id(force_full_refresh_requested) = true;
+              ESP_LOGI("power_profile", "manual wake detected, forcing one refresh");
+            }
         - delay: 200ms
         - component.update: battery_voltage
         - component.update: battery_level
@@ -38,6 +49,7 @@ psram:
   speed: 80MHz
 
 logger:
+  level: INFO
 
 api:
   encryption:
@@ -50,6 +62,13 @@ ota:
 wifi:
   ssid: !secret wifi_ssid
   password: !secret wifi_password
+  fast_connect: true
+  power_save_mode: HIGH
+  # 静态 IP 可以明显缩短唤醒后联网时间。填好 secrets 后取消注释。
+  # manual_ip:
+  #   static_ip: !secret wifi_static_ip
+  #   gateway: !secret wifi_gateway
+  #   subnet: !secret wifi_subnet
   on_connect:
     then:
       - delay: 5s
@@ -57,6 +76,7 @@ wifi:
   ap:
     ssid: "InfoHub Fallback"
     password: !secret wifi_fallback_password
+    ap_timeout: 0s
 
 captive_portal:
 
@@ -69,8 +89,8 @@ output:
 
 http_request:
   verify_ssl: false
-  timeout: 20s
-  watchdog_timeout: 25s
+  timeout: 10s
+  watchdog_timeout: 12s
   useragent: ${device_name}
 
 font:
@@ -163,6 +183,10 @@ globals:
     type: bool
     restore_value: no
     initial_value: 'false'
+  - id: manual_wake_refresh_requested
+    type: bool
+    restore_value: no
+    initial_value: 'false'
   - id: partial_refresh_counter
     type: int
     restore_value: no
@@ -221,7 +245,7 @@ sensor:
     pin: GPIO1
     name: "${friendly_name} Battery Voltage"
     id: battery_voltage
-    update_interval: 30s
+    update_interval: ${battery_sensor_update_interval}
     attenuation: 12db
     accuracy_decimals: 2
     filters:
@@ -266,7 +290,7 @@ sensor:
     accuracy_decimals: 0
     lambda: |-
       return id(battery_voltage).state;
-    update_interval: 30s
+    update_interval: ${battery_sensor_update_interval}
     filters:
       - calibrate_linear:
           - 4.15 -> 100.0
@@ -305,7 +329,7 @@ text_sensor:
   - platform: template
     name: "${friendly_name} Power Profile"
     icon: "mdi:power-plug-battery"
-    update_interval: 30s
+    update_interval: ${power_profile_update_interval}
     lambda: |-
       if (!id(battery_sample_ready)) {
         return {"检测中"};
@@ -374,6 +398,10 @@ script:
                 return false;
               }
 
+              if (id(manual_wake_refresh_requested)) {
+                return true;
+              }
+
               if (id(external_power_connected)) {
                 return true;
               }
@@ -427,7 +455,9 @@ script:
                       id(last_error_text) = next_error;
                       // Keep the previous E-Ink frame when the device reboots
                       // but the first refetch still has not succeeded yet.
-                      should_refresh = has_cached_payload;
+                      should_refresh = has_cached_payload || id(manual_wake_refresh_requested);
+                    } else if (id(manual_wake_refresh_requested)) {
+                      should_refresh = true;
                     }
                     id(pending_display_refresh) = should_refresh;
                     return;
@@ -480,7 +510,9 @@ script:
                     bool has_cached_payload = !id(last_payload_body).empty();
                     if (id(last_error_text) != next_error) {
                       id(last_error_text) = next_error;
-                      should_refresh = has_cached_payload;
+                      should_refresh = has_cached_payload || id(manual_wake_refresh_requested);
+                    } else if (id(manual_wake_refresh_requested)) {
+                      should_refresh = true;
                     }
                     id(pending_display_refresh) = should_refresh;
                     return;
@@ -580,7 +612,9 @@ script:
               - lambda: |-
                   std::string next_error = "network error";
                   bool has_cached_payload = !id(last_payload_body).empty();
-                  bool should_refresh = has_cached_payload && id(last_error_text) != next_error;
+                  bool should_refresh =
+                    id(manual_wake_refresh_requested) ||
+                    (has_cached_payload && id(last_error_text) != next_error);
                   id(last_error_text) = next_error;
                   id(pending_display_refresh) = should_refresh;
               - if:
@@ -589,6 +623,27 @@ script:
                   then:
                     - component.update: epaper_display
                     - lambda: id(pending_display_refresh) = false;
+      - if:
+          condition:
+            lambda: |-
+              if (!id(manual_wake_refresh_requested) || id(external_power_connected)) {
+                return false;
+              }
+
+              auto now = id(sntp_clock).now();
+              return now.is_valid() &&
+                (now.hour >= ${battery_quiet_start_hour} ||
+                 now.hour < ${battery_quiet_end_hour});
+          then:
+            - logger.log: "manual night wake refresh finished, returning to deep sleep"
+            - lambda: id(manual_wake_refresh_requested) = false;
+            - delay: 10s
+            - deep_sleep.enter:
+                id: quiet_hours_sleep
+                until: "10:00:00"
+                time_id: sntp_clock
+          else:
+            - lambda: id(manual_wake_refresh_requested) = false;
 
 interval:
   - interval: ${plugged_poll_interval}

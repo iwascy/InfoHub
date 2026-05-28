@@ -1,21 +1,43 @@
 # Stage 2 profile:
 # first finish USB bring-up with a known-good Stage 1 profile,
 # then switch to this API-driven panel.
-# 2026-04-22 实测当前这台 E1001 需要 7.50inv2alt + reset_duration 2ms
-# 才能稳定结束白屏并正常点亮。
+# 2026-04-23 当前这台 E1001 已完成 partial refresh 验证。
+# 正式业务面板切换到 7.50inV2p，并保留 2ms reset 时序。
 
 substitutions:
   device_name: reterminal-e1001-infohub
   friendly_name: reTerminal E1001 InfoHub
-  poll_interval: 5min
+  plugged_poll_interval: 2min
+  battery_poll_interval: 15min
+  battery_sensor_update_interval: 2min
+  power_profile_update_interval: 5min
+  full_payload_sync_every: "6"
+  time_zone: Asia/Shanghai
+  battery_quiet_start_hour: "22"
+  battery_quiet_end_hour: "10"
+  plugged_voltage_threshold: "4.15"
+  battery_voltage_threshold: "4.05"
+  low_battery_level_threshold: "20"
 
 esphome:
   name: ${device_name}
   friendly_name: ${friendly_name}
   on_boot:
-    priority: -100
-    then:
-      - script.execute: fetch_dashboard_payload
+    - priority: 600
+      then:
+        - output.turn_on: bsp_battery_enable
+        - lambda: |-
+            esp_sleep_wakeup_cause_t wakeup_cause = esp_sleep_get_wakeup_cause();
+            if (wakeup_cause == ESP_SLEEP_WAKEUP_EXT0 ||
+                wakeup_cause == ESP_SLEEP_WAKEUP_EXT1 ||
+                wakeup_cause == ESP_SLEEP_WAKEUP_GPIO) {
+              id(manual_wake_refresh_requested) = true;
+              id(force_full_refresh_requested) = true;
+              ESP_LOGI("power_profile", "manual wake detected, forcing one refresh");
+            }
+        - delay: 200ms
+        - component.update: battery_voltage
+        - component.update: battery_level
 
 esp32:
   board: esp32-s3-devkitc-1
@@ -27,6 +49,7 @@ psram:
   speed: 80MHz
 
 logger:
+  level: INFO
 
 api:
   encryption:
@@ -39,40 +62,112 @@ ota:
 wifi:
   ssid: !secret wifi_ssid
   password: !secret wifi_password
+  fast_connect: true
+  power_save_mode: HIGH
+  # 静态 IP 可以明显缩短唤醒后联网时间。填好 secrets 后取消注释。
+  # manual_ip:
+  #   static_ip: !secret wifi_static_ip
+  #   gateway: !secret wifi_gateway
+  #   subnet: !secret wifi_subnet
+  on_connect:
+    then:
+      - delay: 5s
+      - script.execute: run_power_aware_refresh
   ap:
     ssid: "InfoHub Fallback"
     password: !secret wifi_fallback_password
+    ap_timeout: 0s
 
 captive_portal:
 
 json:
 
+output:
+  - platform: gpio
+    pin: GPIO21
+    id: bsp_battery_enable
+
 http_request:
   verify_ssl: false
-  timeout: 20s
-  watchdog_timeout: 25s
+  timeout: 10s
+  watchdog_timeout: 12s
   useragent: ${device_name}
 
 font:
   - file: "gfonts://Noto+Sans+SC@700"
+    id: font_huge
+    size: 54
+    glyphsets: &infohub_font_glyphsets
+      - GF_Latin_Kernel
+    glyphs: &infohub_font_glyphs '：刷新时间状态等待首次拉取数据解析失败请求成本启用告警总量今日合计余仅正常关注充足最佳耗尽重置暂无同步与系统概览配额显示按键周期点急低电'
+  - file: "gfonts://Noto+Sans+SC@700"
+    id: font_header
+    size: 24
+    glyphsets: *infohub_font_glyphsets
+    glyphs: *infohub_font_glyphs
+  - file: "gfonts://Noto+Sans+SC@700"
+    id: font_time
+    size: 16
+    glyphsets: *infohub_font_glyphsets
+    glyphs: *infohub_font_glyphs
+  - file: "gfonts://Noto+Sans+SC@700"
+    id: font_label
+    size: 17
+    glyphsets: *infohub_font_glyphsets
+    glyphs: *infohub_font_glyphs
+  - file: "gfonts://Noto+Sans+SC@700"
     id: font_title
-    size: 28
-    glyphs: ' 0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz%$.,:-_+/()[]#&!?@*=<>"''：刷新时间面板请求成本启用告警总量今日合计余仅正常关注充足最佳耗尽数据等待首次拉取失败离线状态重置暂无同步·Σ前号定度异当控提有析概没点监稳览解账还配醒额'
+    size: 17
+    glyphsets: *infohub_font_glyphsets
+    glyphs: *infohub_font_glyphs
+  - file: "gfonts://Noto+Sans+SC@700"
+    id: font_metric
+    size: 18
+    glyphsets: *infohub_font_glyphsets
+    glyphs: *infohub_font_glyphs
   - file: "gfonts://Noto+Sans+SC@600"
     id: font_md
-    size: 20
-    glyphs: ' 0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz%$.,:-_+/()[]#&!?@*=<>"''：刷新时间面板请求成本启用告警总量今日合计余仅正常关注充足最佳耗尽数据等待首次拉取失败离线状态重置暂无同步·Σ前号定度异当控提有析概没点监稳览解账还配醒额'
-  - file: "gfonts://Noto+Sans+SC@500"
+    size: 15
+    glyphsets: *infohub_font_glyphsets
+    glyphs: *infohub_font_glyphs
+  - file: "gfonts://Noto+Sans+SC@700"
     id: font_sm
-    size: 16
-    glyphs: ' 0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz%$.,:-_+/()[]#&!?@*=<>"''：刷新时间面板请求成本启用告警总量今日合计余仅正常关注充足最佳耗尽数据等待首次拉取失败离线状态重置暂无同步·Σ前号定度异当控提有析概没点监稳览解账还配醒额'
-  - file: "gfonts://Noto+Sans+SC@500"
+    size: 14
+    glyphsets: *infohub_font_glyphsets
+    glyphs: *infohub_font_glyphs
+  - file: "gfonts://Noto+Sans+SC@700"
     id: font_xs
-    size: 12
-    glyphs: ' 0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz%$.,:-_+/()[]#&!?@*=<>"''：刷新时间面板请求成本启用告警总量今日合计余仅正常关注充足最佳耗尽数据等待首次拉取失败离线状态重置暂无同步·Σ前号定度异当控提有析概没点监稳览解账还配醒额'
+    size: 13
+    glyphsets: *infohub_font_glyphsets
+    glyphs: *infohub_font_glyphs
+  - file: "gfonts://Noto+Sans+SC@700"
+    id: font_badge
+    size: 13
+    glyphsets: *infohub_font_glyphsets
+    glyphs: *infohub_font_glyphs
 
 globals:
+  - id: battery_sample_ready
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: low_battery_active
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: low_battery_display_refresh_pending
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: external_power_connected
+    type: bool
+    restore_value: no
+    initial_value: 'false'
   - id: last_payload_body
+    type: std::string
+    restore_value: no
+    initial_value: '""'
+  - id: staged_payload_body
     type: std::string
     restore_value: no
     initial_value: '""'
@@ -84,12 +179,263 @@ globals:
     type: bool
     restore_value: no
     initial_value: 'false'
+  - id: force_full_refresh_requested
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: manual_wake_refresh_requested
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: partial_refresh_counter
+    type: int
+    restore_value: no
+    initial_value: '0'
+  - id: claude_value_live
+    type: std::string
+    restore_value: no
+    initial_value: '"--"'
+  - id: claude_cost_live
+    type: std::string
+    restore_value: no
+    initial_value: '"--"'
+  - id: claude_requests_live
+    type: int
+    restore_value: no
+    initial_value: '0'
+  - id: claude_enabled_live
+    type: int
+    restore_value: no
+    initial_value: '0'
+  - id: codex_value_live
+    type: std::string
+    restore_value: no
+    initial_value: '"--"'
+  - id: codex_cost_live
+    type: std::string
+    restore_value: no
+    initial_value: '"--"'
+  - id: codex_requests_live
+    type: int
+    restore_value: no
+    initial_value: '0'
+  - id: codex_enabled_live
+    type: int
+    restore_value: no
+    initial_value: '0'
+  - id: total_value_live
+    type: std::string
+    restore_value: no
+    initial_value: '"--"'
+  - id: total_cost_live
+    type: std::string
+    restore_value: no
+    initial_value: '"--"'
+  - id: total_requests_live
+    type: int
+    restore_value: no
+    initial_value: '0'
+  - id: total_alerts_live
+    type: int
+    restore_value: no
+    initial_value: '0'
+
+sensor:
+  - platform: adc
+    pin: GPIO1
+    name: "${friendly_name} Battery Voltage"
+    id: battery_voltage
+    update_interval: ${battery_sensor_update_interval}
+    attenuation: 12db
+    accuracy_decimals: 2
+    filters:
+      - multiply: 2.0
+    on_value:
+      then:
+        - lambda: |-
+            const float plugged_threshold = ${plugged_voltage_threshold};
+            const float battery_threshold = ${battery_voltage_threshold};
+            bool had_sample = id(battery_sample_ready);
+            bool previous_mode = id(external_power_connected);
+            bool next_mode = previous_mode;
+
+            if (!had_sample) {
+              next_mode = x >= plugged_threshold;
+              id(battery_sample_ready) = true;
+            } else if (x >= plugged_threshold) {
+              next_mode = true;
+            } else if (x <= battery_threshold) {
+              next_mode = false;
+            }
+
+            id(external_power_connected) = next_mode;
+
+            if (had_sample && next_mode != previous_mode) {
+              ESP_LOGI(
+                "power_profile",
+                "power profile changed to %s at %.2fV",
+                next_mode ? "plugged" : "battery",
+                x
+              );
+              id(run_power_aware_refresh).execute();
+            }
+
+  - platform: template
+    name: "${friendly_name} Battery Level"
+    id: battery_level
+    unit_of_measurement: "%"
+    icon: "mdi:battery"
+    device_class: battery
+    state_class: measurement
+    accuracy_decimals: 0
+    lambda: |-
+      return id(battery_voltage).state;
+    update_interval: ${battery_sensor_update_interval}
+    filters:
+      - calibrate_linear:
+          - 4.15 -> 100.0
+          - 3.96 -> 90.0
+          - 3.91 -> 80.0
+          - 3.85 -> 70.0
+          - 3.80 -> 60.0
+          - 3.75 -> 50.0
+          - 3.68 -> 40.0
+          - 3.58 -> 30.0
+          - 3.49 -> 20.0
+          - 3.41 -> 10.0
+          - 3.30 -> 5.0
+          - 3.27 -> 0.0
+      - clamp:
+          min_value: 0
+          max_value: 100
+    on_value:
+      then:
+        - lambda: |-
+            const float low_battery_threshold = ${low_battery_level_threshold};
+            bool next_low_battery = x <= low_battery_threshold;
+            bool changed = id(low_battery_active) != next_low_battery;
+
+            id(low_battery_active) = next_low_battery;
+            id(low_battery_display_refresh_pending) =
+              changed && (!id(last_payload_body).empty() || !id(last_error_text).empty());
+        - if:
+            condition:
+              lambda: return id(low_battery_display_refresh_pending);
+            then:
+              - component.update: epaper_display
+              - lambda: id(low_battery_display_refresh_pending) = false;
+
+text_sensor:
+  - platform: template
+    name: "${friendly_name} Power Profile"
+    icon: "mdi:power-plug-battery"
+    update_interval: ${power_profile_update_interval}
+    lambda: |-
+      if (!id(battery_sample_ready)) {
+        return {"检测中"};
+      }
+
+      if (id(external_power_connected)) {
+        return {"插电高实时"};
+      }
+
+      auto now = id(sntp_clock).now();
+      if (now.is_valid() &&
+          (now.hour >= ${battery_quiet_start_hour} || now.hour < ${battery_quiet_end_hour})) {
+        return {"电池夜间静默"};
+      }
+
+      return {"电池省电"};
+
+time:
+  - platform: sntp
+    id: sntp_clock
+    timezone: ${time_zone}
+    on_time_sync:
+      then:
+        - script.execute: run_power_aware_refresh
+    on_time:
+      - hours: ${battery_quiet_start_hour}
+        minutes: 0
+        seconds: 0
+        then:
+          - if:
+              condition:
+                lambda: return id(battery_sample_ready) && !id(external_power_connected);
+              then:
+                - logger.log: "battery quiet hours started, entering deep sleep"
+                - deep_sleep.enter:
+                    id: quiet_hours_sleep
+                    until: "10:00:00"
+                    time_id: sntp_clock
+      - hours: ${battery_quiet_end_hour}
+        minutes: 0
+        seconds: 0
+        then:
+          - script.execute: run_power_aware_refresh
+
+deep_sleep:
+  id: quiet_hours_sleep
+  wakeup_pin:
+    number: GPIO4
+    mode: INPUT_PULLUP
+    inverted: true
+    allow_other_uses: true
+  wakeup_pin_mode: INVERT_WAKEUP
 
 spi:
   clk_pin: GPIO7
   mosi_pin: GPIO9
 
 script:
+  - id: run_power_aware_refresh
+    mode: restart
+    then:
+      - if:
+          condition:
+            lambda: |-
+              if (!id(battery_sample_ready)) {
+                return false;
+              }
+
+              if (id(manual_wake_refresh_requested)) {
+                return true;
+              }
+
+              if (id(external_power_connected)) {
+                return true;
+              }
+
+              auto now = id(sntp_clock).now();
+              if (!now.is_valid()) {
+                return false;
+              }
+
+              return now.hour < ${battery_quiet_end_hour} ||
+                now.hour >= ${battery_quiet_start_hour}
+                ? false
+                : true;
+          then:
+            - script.execute: fetch_dashboard_payload
+          else:
+            - if:
+                condition:
+                  lambda: |-
+                    if (!id(battery_sample_ready) || id(external_power_connected)) {
+                      return false;
+                    }
+
+                    auto now = id(sntp_clock).now();
+                    return now.is_valid() &&
+                      (now.hour >= ${battery_quiet_start_hour} ||
+                       now.hour < ${battery_quiet_end_hour});
+                then:
+                  - logger.log: "battery quiet hours active, entering deep sleep until 10:00"
+                  - deep_sleep.enter:
+                      id: quiet_hours_sleep
+                      until: "10:00:00"
+                      time_id: sntp_clock
+
   - id: fetch_dashboard_payload
     mode: restart
     then:
@@ -100,19 +446,151 @@ script:
           on_response:
             then:
               - lambda: |-
+                  const int full_payload_sync_every = ${full_payload_sync_every};
                   bool should_refresh = false;
                   if (response->status_code != 200) {
                     std::string next_error = "HTTP " + std::to_string(response->status_code);
+                    bool has_cached_payload = !id(last_payload_body).empty();
                     if (id(last_error_text) != next_error) {
                       id(last_error_text) = next_error;
+                      // Keep the previous E-Ink frame when the device reboots
+                      // but the first refetch still has not succeeded yet.
+                      should_refresh = has_cached_payload || id(manual_wake_refresh_requested);
+                    } else if (id(manual_wake_refresh_requested)) {
                       should_refresh = true;
                     }
                     id(pending_display_refresh) = should_refresh;
                     return;
                   }
 
-                  if (id(last_payload_body) != body) {
+                  std::string next_claude_value = "--";
+                  std::string next_claude_cost = "--";
+                  int next_claude_requests = 0;
+                  int next_claude_enabled = 0;
+
+                  std::string next_codex_value = "--";
+                  std::string next_codex_cost = "--";
+                  int next_codex_requests = 0;
+                  int next_codex_enabled = 0;
+
+                  std::string next_total_value = "--";
+                  std::string next_total_cost = "--";
+                  int next_total_requests = 0;
+                  int next_total_alerts = 0;
+
+                  bool parsed = json::parse_json(body, [&](JsonObject root) -> bool {
+                    JsonObject claude_obj = root["claude"];
+                    const char *claude_value = claude_obj["value"] | "--";
+                    const char *claude_cost = claude_obj["cost"] | "--";
+                    next_claude_value = claude_value != nullptr ? claude_value : "--";
+                    next_claude_cost = claude_cost != nullptr ? claude_cost : "--";
+                    next_claude_requests = claude_obj["requests"] | 0;
+                    next_claude_enabled = claude_obj["enabled"] | 0;
+
+                    JsonObject codex_obj = root["codex"];
+                    const char *codex_value = codex_obj["value"] | "--";
+                    const char *codex_cost = codex_obj["cost"] | "--";
+                    next_codex_value = codex_value != nullptr ? codex_value : "--";
+                    next_codex_cost = codex_cost != nullptr ? codex_cost : "--";
+                    next_codex_requests = codex_obj["requests"] | 0;
+                    next_codex_enabled = codex_obj["enabled"] | 0;
+
+                    JsonObject total_obj = root["total"];
+                    const char *total_value = total_obj["value"] | "--";
+                    const char *total_cost = total_obj["cost"] | "--";
+                    next_total_value = total_value != nullptr ? total_value : "--";
+                    next_total_cost = total_cost != nullptr ? total_cost : "--";
+                    next_total_requests = total_obj["requests"] | 0;
+                    next_total_alerts = total_obj["alerts"] | 0;
+                    return true;
+                  });
+
+                  if (!parsed) {
+                    std::string next_error = "parse error";
+                    bool has_cached_payload = !id(last_payload_body).empty();
+                    if (id(last_error_text) != next_error) {
+                      id(last_error_text) = next_error;
+                      should_refresh = has_cached_payload || id(manual_wake_refresh_requested);
+                    } else if (id(manual_wake_refresh_requested)) {
+                      should_refresh = true;
+                    }
+                    id(pending_display_refresh) = should_refresh;
+                    return;
+                  }
+
+                  bool metrics_changed = false;
+
+                  if (id(claude_value_live) != next_claude_value) {
+                    id(claude_value_live) = next_claude_value;
+                    metrics_changed = true;
+                  }
+                  if (id(claude_cost_live) != next_claude_cost) {
+                    id(claude_cost_live) = next_claude_cost;
+                    metrics_changed = true;
+                  }
+                  if (id(claude_requests_live) != next_claude_requests) {
+                    id(claude_requests_live) = next_claude_requests;
+                    metrics_changed = true;
+                  }
+                  if (id(claude_enabled_live) != next_claude_enabled) {
+                    id(claude_enabled_live) = next_claude_enabled;
+                    metrics_changed = true;
+                  }
+
+                  if (id(codex_value_live) != next_codex_value) {
+                    id(codex_value_live) = next_codex_value;
+                    metrics_changed = true;
+                  }
+                  if (id(codex_cost_live) != next_codex_cost) {
+                    id(codex_cost_live) = next_codex_cost;
+                    metrics_changed = true;
+                  }
+                  if (id(codex_requests_live) != next_codex_requests) {
+                    id(codex_requests_live) = next_codex_requests;
+                    metrics_changed = true;
+                  }
+                  if (id(codex_enabled_live) != next_codex_enabled) {
+                    id(codex_enabled_live) = next_codex_enabled;
+                    metrics_changed = true;
+                  }
+
+                  if (id(total_value_live) != next_total_value) {
+                    id(total_value_live) = next_total_value;
+                    metrics_changed = true;
+                  }
+                  if (id(total_cost_live) != next_total_cost) {
+                    id(total_cost_live) = next_total_cost;
+                    metrics_changed = true;
+                  }
+                  if (id(total_requests_live) != next_total_requests) {
+                    id(total_requests_live) = next_total_requests;
+                    metrics_changed = true;
+                  }
+                  if (id(total_alerts_live) != next_total_alerts) {
+                    id(total_alerts_live) = next_total_alerts;
+                    metrics_changed = true;
+                  }
+
+                  bool needs_full_payload_sync = id(force_full_refresh_requested) || id(last_payload_body).empty();
+                  bool body_changed = id(last_payload_body) != body;
+
+                  if (body_changed && !needs_full_payload_sync) {
+                    id(staged_payload_body) = body;
+                  }
+
+                  if (metrics_changed) {
+                    should_refresh = true;
+                    id(partial_refresh_counter) += 1;
+                  }
+
+                  if (id(partial_refresh_counter) >= full_payload_sync_every) {
+                    needs_full_payload_sync = true;
+                  }
+
+                  if (needs_full_payload_sync) {
                     id(last_payload_body) = body;
+                    id(staged_payload_body).clear();
+                    id(partial_refresh_counter) = 0;
                     should_refresh = true;
                   }
 
@@ -121,6 +599,7 @@ script:
                     should_refresh = true;
                   }
 
+                  id(force_full_refresh_requested) = false;
                   id(pending_display_refresh) = should_refresh;
               - if:
                   condition:
@@ -132,7 +611,10 @@ script:
             then:
               - lambda: |-
                   std::string next_error = "network error";
-                  bool should_refresh = id(last_error_text) != next_error;
+                  bool has_cached_payload = !id(last_payload_body).empty();
+                  bool should_refresh =
+                    id(manual_wake_refresh_requested) ||
+                    (has_cached_payload && id(last_error_text) != next_error);
                   id(last_error_text) = next_error;
                   id(pending_display_refresh) = should_refresh;
               - if:
@@ -141,16 +623,50 @@ script:
                   then:
                     - component.update: epaper_display
                     - lambda: id(pending_display_refresh) = false;
+      - if:
+          condition:
+            lambda: |-
+              if (!id(manual_wake_refresh_requested) || id(external_power_connected)) {
+                return false;
+              }
+
+              auto now = id(sntp_clock).now();
+              return now.is_valid() &&
+                (now.hour >= ${battery_quiet_start_hour} ||
+                 now.hour < ${battery_quiet_end_hour});
+          then:
+            - logger.log: "manual night wake refresh finished, returning to deep sleep"
+            - lambda: id(manual_wake_refresh_requested) = false;
+            - delay: 10s
+            - deep_sleep.enter:
+                id: quiet_hours_sleep
+                until: "10:00:00"
+                time_id: sntp_clock
+          else:
+            - lambda: id(manual_wake_refresh_requested) = false;
 
 interval:
-  - interval: ${poll_interval}
+  - interval: ${plugged_poll_interval}
     then:
-      - script.execute: fetch_dashboard_payload
+      - if:
+          condition:
+            lambda: return id(battery_sample_ready) && id(external_power_connected);
+          then:
+            - script.execute: run_power_aware_refresh
+
+  - interval: ${battery_poll_interval}
+    then:
+      - if:
+          condition:
+            lambda: return id(battery_sample_ready) && !id(external_power_connected);
+          then:
+            - script.execute: run_power_aware_refresh
 
 button:
   - platform: template
     name: "${friendly_name} Force Sync"
     on_press:
+      - lambda: id(force_full_refresh_requested) = true;
       - script.execute: fetch_dashboard_payload
 
 binary_sensor:
@@ -162,14 +678,28 @@ binary_sensor:
     name: "${friendly_name} Refresh Button"
     on_press:
       then:
+        - lambda: id(force_full_refresh_requested) = true;
+        - script.execute: fetch_dashboard_payload
+
+  - platform: gpio
+    pin:
+      number: GPIO4
+      mode: INPUT_PULLUP
+      inverted: true
+      allow_other_uses: true
+    name: "${friendly_name} Wake Button"
+    on_press:
+      then:
+        - lambda: id(force_full_refresh_requested) = true;
         - script.execute: fetch_dashboard_payload
 
 display:
   - platform: waveshare_epaper
     id: epaper_display
-    # 官方示例常见为 7.50inv2，但当前设备实测需要 alt 初始化参数。
-    # 若后续确认屏幕批次支持硬件 partial refresh，再单独评估 7.50inV2p。
-    model: 7.50inv2alt
+    # 当前设备已验证支持 partial refresh，正式面板改走 7.50inV2p。
+    # 保留 2ms reset 时序，避免回退到早期白屏初始化问题。
+    model: 7.50inV2p
+    full_update_every: 15
     cs_pin: GPIO10
     dc_pin: GPIO11
     reset_pin:
@@ -183,17 +713,56 @@ display:
     lambda: |-
       it.fill(COLOR_OFF);
 
-      auto trim_ascii = [&](const std::string &value, size_t max_chars) -> std::string {
-        if (value.size() <= max_chars) {
+      auto trim_text = [&](const std::string &value, size_t max_chars) -> std::string {
+        if (max_chars <= 2) {
           return value;
         }
-        if (max_chars <= 2) {
-          return value.substr(0, max_chars);
+
+        size_t idx = 0;
+        size_t count = 0;
+        while (idx < value.size()) {
+          unsigned char ch = static_cast<unsigned char>(value[idx]);
+          size_t step = 1;
+          if ((ch & 0x80) == 0x00) {
+            step = 1;
+          } else if ((ch & 0xE0) == 0xC0) {
+            step = 2;
+          } else if ((ch & 0xF0) == 0xE0) {
+            step = 3;
+          } else if ((ch & 0xF8) == 0xF0) {
+            step = 4;
+          }
+
+          if (idx + step > value.size()) {
+            break;
+          }
+          if (count == max_chars) {
+            return value.substr(0, idx) + "..";
+          }
+          idx += step;
+          count++;
         }
-        return value.substr(0, max_chars - 2) + "..";
+        return value;
       };
 
-      auto draw_progress = [&](int x, int y, int w, int percent) {
+      auto parse_number_text = [&](const std::string &value) -> long long {
+        long long result = 0;
+        for (char ch : value) {
+          if (ch >= '0' && ch <= '9') {
+            result = result * 10 + (ch - '0');
+          }
+        }
+        return result;
+      };
+
+      auto format_percent = [&](int percent) -> std::string {
+        if (percent < 0) {
+          return "--";
+        }
+        return std::to_string(percent) + "%";
+      };
+
+      auto clamp_percent = [&](int percent) -> int {
         int safe_percent = percent;
         if (safe_percent < 0) {
           safe_percent = 0;
@@ -201,17 +770,198 @@ display:
         if (safe_percent > 100) {
           safe_percent = 100;
         }
-        it.rectangle(x, y, w, 10);
-        int fill = ((w - 2) * safe_percent) / 100;
-        if (fill > 0) {
-          it.filled_rectangle(x + 1, y + 1, fill, 8);
+        return safe_percent;
+      };
+
+      struct Rect {
+        int x;
+        int y;
+        int w;
+        int h;
+      };
+
+      auto right_of = [&](const Rect &rect) -> int {
+        return rect.x + rect.w;
+      };
+
+      auto bottom_of = [&](const Rect &rect) -> int {
+        return rect.y + rect.h;
+      };
+
+      auto measure_text = [&](auto *font, const std::string &text, TextAlign align, int &width, int &height) {
+        int x1 = 0;
+        int y1 = 0;
+        it.get_text_bounds(0, 0, text.c_str(), font, align, &x1, &y1, &width, &height);
+      };
+
+      auto utf8_length = [&](const std::string &value) -> size_t {
+        size_t idx = 0;
+        size_t count = 0;
+        while (idx < value.size()) {
+          unsigned char ch = static_cast<unsigned char>(value[idx]);
+          size_t step = 1;
+          if ((ch & 0x80) == 0x00) {
+            step = 1;
+          } else if ((ch & 0xE0) == 0xC0) {
+            step = 2;
+          } else if ((ch & 0xF0) == 0xE0) {
+            step = 3;
+          } else if ((ch & 0xF8) == 0xF0) {
+            step = 4;
+          }
+
+          if (idx + step > value.size()) {
+            break;
+          }
+          idx += step;
+          count++;
         }
+        return count;
+      };
+
+      auto fit_text_width = [&](auto *font, const std::string &value, int max_width) -> std::string {
+        if (value.empty()) {
+          return value;
+        }
+
+        int width = 0;
+        int height = 0;
+        measure_text(font, value, TextAlign::TOP_LEFT, width, height);
+        if (width <= max_width) {
+          return value;
+        }
+
+        size_t chars = utf8_length(value);
+        while (chars > 2) {
+          std::string candidate = trim_text(value, chars - 1);
+          measure_text(font, candidate, TextAlign::TOP_LEFT, width, height);
+          if (width <= max_width) {
+            return candidate;
+          }
+          chars--;
+        }
+
+        return trim_text(value, 2);
+      };
+
+      auto badge_width = [&](auto *font, const std::string &text, int min_width, int max_width, int padding) -> int {
+        int text_width = 0;
+        int text_height = 0;
+        measure_text(font, text, TextAlign::TOP_LEFT, text_width, text_height);
+        int width = text_width + padding * 2;
+        if (width < min_width) {
+          width = min_width;
+        }
+        if (width > max_width) {
+          width = max_width;
+        }
+        return width;
+      };
+
+      auto draw_filled_round_rect = [&](const Rect &box, int radius, Color color) {
+        if (box.w <= 0 || box.h <= 0) {
+          return;
+        }
+
+        int r = radius;
+        if (r < 0) {
+          r = 0;
+        }
+        if (r * 2 > box.w) {
+          r = box.w / 2;
+        }
+        if (r * 2 > box.h) {
+          r = box.h / 2;
+        }
+
+        if (r <= 0) {
+          it.filled_rectangle(box.x, box.y, box.w, box.h, color);
+          return;
+        }
+
+        int center_w = box.w - r * 2;
+        int center_h = box.h - r * 2;
+        if (center_w > 0) {
+          it.filled_rectangle(box.x + r, box.y, center_w, box.h, color);
+        }
+        if (center_h > 0) {
+          it.filled_rectangle(box.x, box.y + r, box.w, center_h, color);
+        }
+
+        it.filled_circle(box.x + r, box.y + r, r, color);
+        it.filled_circle(box.x + box.w - r - 1, box.y + r, r, color);
+        it.filled_circle(box.x + r, box.y + box.h - r - 1, r, color);
+        it.filled_circle(box.x + box.w - r - 1, box.y + box.h - r - 1, r, color);
+      };
+
+      auto draw_outline_round_rect = [&](const Rect &box, int radius) {
+        if (box.w <= 0 || box.h <= 0) {
+          return;
+        }
+
+        draw_filled_round_rect(box, radius, COLOR_ON);
+        if (box.w <= 2 || box.h <= 2) {
+          return;
+        }
+
+        Rect inner{box.x + 1, box.y + 1, box.w - 2, box.h - 2};
+        int inner_radius = radius > 0 ? radius - 1 : 0;
+        draw_filled_round_rect(inner, inner_radius, COLOR_OFF);
+      };
+
+      auto draw_badge = [&](const Rect &box, const std::string &text, bool filled) {
+        std::string fitted = fit_text_width(id(font_badge), text, box.w - 10);
+        int radius = box.h / 2;
+        if (filled) {
+          draw_filled_round_rect(box, radius, COLOR_ON);
+          it.printf(
+            box.x + box.w / 2,
+            box.y + box.h / 2,
+            id(font_badge),
+            COLOR_OFF,
+            COLOR_ON,
+            TextAlign::CENTER,
+            "%s",
+            fitted.c_str()
+          );
+          return;
+        }
+
+        draw_outline_round_rect(box, radius);
+        it.printf(box.x + box.w / 2, box.y + box.h / 2, id(font_badge), TextAlign::CENTER, "%s", fitted.c_str());
+      };
+
+      auto draw_progress = [&](const Rect &track, int percent, bool full_when_unknown) {
+        draw_outline_round_rect(track, track.h / 2);
+
+        int safe_percent = percent < 0 ? (full_when_unknown ? 100 : 0) : clamp_percent(percent);
+        if (safe_percent <= 0) {
+          return;
+        }
+
+        int inner_w = track.w - 2;
+        int inner_h = track.h - 2;
+        if (inner_w <= 0 || inner_h <= 0) {
+          return;
+        }
+
+        int fill_w = (inner_w * safe_percent) / 100;
+        int min_fill = inner_h;
+        if (fill_w < min_fill) {
+          fill_w = min_fill;
+        }
+        if (fill_w > inner_w) {
+          fill_w = inner_w;
+        }
+
+        Rect fill{track.x + 1, track.y + 1, fill_w, inner_h};
+        draw_filled_round_rect(fill, fill.h / 2, COLOR_ON);
       };
 
       struct OverviewData {
         std::string title;
         std::string value;
-        std::string label;
+        long long value_numeric;
         std::string cost;
         int requests;
         int enabled;
@@ -225,54 +975,91 @@ display:
         std::string status;
       };
 
-      OverviewData claude = {"Claude", "--", "Token", "--", 0, -1, 0};
-      OverviewData sub2api = {"Sub2API", "--", "Token", "--", 0, -1, 0};
-      OverviewData total = {"Total", "--", "Token", "--", 0, -1, 0};
+      OverviewData claude = {"Claude", "--", 0, "--", 0, -1, 0};
+      OverviewData codex = {"Codex", "--", 0, "--", 0, -1, 0};
+      OverviewData total = {"合计", "--", 0, "--", 0, -1, 0};
 
       RowData claude_rows[2] = {{"--", -1, -1, "--"}, {"--", -1, -1, "--"}};
-      RowData sub2api_rows[2] = {{"--", -1, -1, "--"}, {"--", -1, -1, "--"}};
+      RowData codex_rows[2] = {{"--", -1, -1, "--"}, {"--", -1, -1, "--"}};
       int claude_row_count = 0;
-      int sub2api_row_count = 0;
+      int codex_row_count = 0;
 
       std::string alert_lines[3] = {"暂无告警", "", ""};
       int alert_count = 0;
 
       std::string updated_at = "--";
       std::string reset_claude = "--";
-      std::string reset_sub2api = "--";
+      std::string reset_codex = "--";
       int refresh_seconds = 0;
 
-      auto draw_card = [&](int x, int y, int w, const char *badge, const OverviewData &item) {
-        it.rectangle(x, y, w, 96);
-        it.rectangle(x + 12, y + 12, 42, 42);
-        it.printf(x + 22, y + 24, id(font_sm), "%s", badge);
-        it.printf(x + 66, y + 12, id(font_sm), "%s", item.title.c_str());
-        it.printf(x + 66, y + 34, id(font_title), "%s", item.value.c_str());
-        it.printf(x + 66, y + 68, id(font_xs), "%s", item.label.c_str());
-        it.printf(x + 12, y + 82, id(font_xs), "请求 %d", item.requests);
-        it.printf(x + 94, y + 82, id(font_xs), "成本 %s", item.cost.c_str());
-        if (item.enabled >= 0) {
-          it.printf(x + w - 70, y + 82, id(font_xs), "启用 %d", item.enabled);
-        } else if (item.alerts > 0) {
-          it.printf(x + w - 78, y + 82, id(font_xs), "告警 %d", item.alerts);
+      auto format_token_m = [&](const OverviewData &item) -> std::string {
+        long long raw = item.value_numeric;
+        if (raw <= 0) {
+          raw = parse_number_text(item.value);
         }
+        if (raw <= 0) {
+          return "--";
+        }
+        long long tenths = (raw + 50000) / 100000;
+        long long whole = tenths / 10;
+        long long decimal = tenths % 10;
+        return std::to_string(whole) + "." + std::to_string(decimal) + "M";
       };
 
-      auto draw_row = [&](int x, int y, int w, const RowData &row) {
-        it.rectangle(x, y, w, 24);
-        it.printf(x + 8, y + 7, id(font_xs), "%s", trim_ascii(row.account, 12).c_str());
+      auto format_money = [&](const std::string &cost) -> std::string {
+        if (cost.empty() || cost == "--") {
+          return "--";
+        }
+        return "$" + cost;
+      };
 
-        std::string five_text = row.five_percent < 0 ? "--" : std::to_string(row.five_percent) + "%";
-        std::string week_text = row.week_percent < 0 ? "--" : std::to_string(row.week_percent) + "%";
+      auto draw_overview_card = [&](const Rect &box, const std::string &title, const OverviewData &item) {
+        std::string fitted_title = fit_text_width(id(font_label), title, box.w - 24);
+        std::string value_m = format_token_m(item);
+        std::string money_text = format_money(item.cost);
+        int divider_y = box.y + box.h - 31;
 
-        it.printf(x + 110, y + 7, id(font_xs), "%s", five_text.c_str());
-        draw_progress(x + 142, y + 8, 70, row.five_percent);
+        draw_outline_round_rect(box, 0);
+        it.printf(box.x + 12, box.y + 11, id(font_label), "%s", fitted_title.c_str());
 
-        it.printf(x + 220, y + 7, id(font_xs), "%s", week_text.c_str());
-        draw_progress(x + 252, y + 8, 70, row.week_percent);
+        Rect value_clip{box.x + 12, box.y + 31, box.w - 24, divider_y - box.y - 34};
+        it.start_clipping(value_clip.x, value_clip.y, value_clip.x + value_clip.w, value_clip.y + value_clip.h);
+        it.printf(value_clip.x, value_clip.y, id(font_huge), "%s", value_m.c_str());
+        it.end_clipping();
 
-        it.rectangle(x + w - 64, y + 4, 56, 16);
-        it.printf(x + w - 56, y + 7, id(font_xs), "%s", trim_ascii(row.status, 6).c_str());
+        it.line(box.x + 12, divider_y, box.x + box.w - 12, divider_y);
+        it.printf(box.x + 12, divider_y + 7, id(font_sm), "%s", fit_text_width(id(font_sm), money_text, box.w - 24).c_str());
+      };
+
+      auto status_severity = [&](const RowData &row) -> int {
+        bool has_five = row.five_percent >= 0;
+        bool has_week = row.week_percent >= 0;
+        if (!has_five && !has_week) {
+          return 0;
+        }
+        if (has_week && row.week_percent == 0) {
+          return 5;
+        }
+        if ((has_five && row.five_percent <= 20) || (has_week && row.week_percent <= 10)) {
+          return 4;
+        }
+        if ((has_five && row.five_percent <= 50) || (has_week && row.week_percent <= 50) || row.status.find("关注") != std::string::npos) {
+          return 3;
+        }
+        return 1;
+      };
+
+      auto row_floor = [&](const RowData &row) -> int {
+        if (row.five_percent >= 0 && row.week_percent >= 0) {
+          return row.five_percent < row.week_percent ? row.five_percent : row.week_percent;
+        }
+        if (row.five_percent >= 0) {
+          return row.five_percent;
+        }
+        if (row.week_percent >= 0) {
+          return row.week_percent;
+        }
+        return 101;
       };
 
       auto load_row = [&](JsonObject src, RowData &dst) {
@@ -287,6 +1074,98 @@ display:
         dst.week_percent = week["percent"] | -1;
       };
 
+      auto pick_focus_row = [&](RowData rows[2], int count) -> RowData {
+        RowData selected = {"--", -1, -1, "--"};
+        if (count <= 0) {
+          return selected;
+        }
+
+        selected = rows[0];
+        for (int idx = 1; idx < count; idx++) {
+          int current_severity = status_severity(rows[idx]);
+          int selected_severity = status_severity(selected);
+          if (current_severity > selected_severity) {
+            selected = rows[idx];
+            continue;
+          }
+          if (current_severity == selected_severity && row_floor(rows[idx]) < row_floor(selected)) {
+            selected = rows[idx];
+          }
+        }
+        return selected;
+      };
+
+      auto draw_quota_card = [&](const Rect &box, const std::string &title, const std::string &reset_text, const RowData &row, bool show_reset) {
+        int metric_top = box.y + (show_reset ? 63 : 39);
+        int track_y = box.y + (show_reset ? 91 : 63);
+        int divider_top = box.y + (show_reset ? 64 : 38);
+        int divider_bottom = box.y + (show_reset ? 107 : 79);
+        Rect five_track{box.x + 12, track_y, 190, 9};
+        Rect week_track{box.x + 252, track_y, 230, 9};
+
+        draw_outline_round_rect(box, 0);
+        it.printf(box.x + 12, box.y + 10, id(font_title), "%s", fit_text_width(id(font_title), title, box.w - 24).c_str());
+        if (show_reset) {
+          it.printf(box.x + 12, box.y + 36, id(font_xs), "%s", fit_text_width(id(font_xs), reset_text, box.w - 24).c_str());
+        }
+
+        it.printf(box.x + 12, metric_top, id(font_metric), "5H");
+        it.printf(box.x + 197, metric_top, id(font_metric), TextAlign::TOP_RIGHT, "%s", format_percent(row.five_percent).c_str());
+        draw_progress(five_track, row.five_percent, true);
+
+        it.line(box.x + 227, divider_top, box.x + 227, divider_bottom);
+
+        it.printf(box.x + 252, metric_top, id(font_metric), "Week");
+        it.printf(box.x + 478, metric_top, id(font_metric), TextAlign::TOP_RIGHT, "%s", format_percent(row.week_percent).c_str());
+        draw_progress(week_track, row.week_percent, true);
+      };
+
+      auto split_alert = [&](const std::string &alert, std::string &line_one, std::string &line_two) {
+        line_one = trim_text(alert, 18);
+        line_two.clear();
+
+        size_t cut = alert.find("：");
+        size_t skip = std::string("：").size();
+        if (cut == std::string::npos) {
+          cut = alert.find(':');
+          skip = 1;
+        }
+        if (cut == std::string::npos) {
+          return;
+        }
+
+        line_one = trim_text(alert.substr(0, cut), 16);
+        line_two = alert.substr(cut + skip);
+        while (!line_two.empty() && line_two[0] == ' ') {
+          line_two.erase(0, 1);
+        }
+        line_two = trim_text(line_two, 18);
+      };
+
+      auto draw_refresh_icon = [&](int cx, int cy) {
+        it.circle(cx, cy, 5);
+      };
+
+      auto draw_system_panel = [&](const Rect &box, int current_alert_count, const std::string &alert_title, const std::string &alert_detail, int current_refresh_seconds) {
+        std::string refresh_text = current_refresh_seconds > 0 ? "刷新周期 " + std::to_string(current_refresh_seconds) + "s" : "刷新周期 --";
+
+        draw_outline_round_rect(box, 0);
+        it.printf(box.x + 16, box.y + 10, id(font_title), "告警");
+
+        if (current_alert_count == 0) {
+          it.printf(box.x + 16, box.y + 56, id(font_md), "暂无告警");
+        } else {
+          it.printf(box.x + 16, box.y + 56, id(font_md), "%s", fit_text_width(id(font_md), "1. " + alert_title, box.w - 32).c_str());
+          if (!alert_detail.empty()) {
+            it.printf(box.x + 16, box.y + 79, id(font_md), "%s", fit_text_width(id(font_md), alert_detail, box.w - 32).c_str());
+          }
+        }
+
+        it.line(box.x + 16, box.y + 213, box.x + box.w - 16, box.y + 213);
+        draw_refresh_icon(box.x + 25, box.y + 231);
+        it.printf(box.x + 40, box.y + 225, id(font_xs), "%s", fit_text_width(id(font_xs), refresh_text, box.w - 56).c_str());
+      };
+
       bool parsed = false;
       if (!id(last_payload_body).empty()) {
         parsed = json::parse_json(id(last_payload_body), [&](JsonObject root) -> bool {
@@ -295,41 +1174,32 @@ display:
           refresh_seconds = root["refresh_seconds"] | 0;
 
           JsonObject claude_obj = root["claude"];
-          const char *claude_title = claude_obj["title"] | "Claude";
           const char *claude_value = claude_obj["value"] | "--";
-          const char *claude_label = claude_obj["label"] | "Token";
           const char *claude_cost = claude_obj["cost"] | "--";
-          claude.title = claude_title != nullptr ? claude_title : "Claude";
           claude.value = claude_value != nullptr ? claude_value : "--";
-          claude.label = claude_label != nullptr ? claude_label : "Token";
           claude.cost = claude_cost != nullptr ? claude_cost : "--";
           claude.requests = claude_obj["requests"] | 0;
           claude.enabled = claude_obj["enabled"] | -1;
+          claude.value_numeric = claude_obj["value_numeric"] | 0;
 
-          JsonObject sub2api_obj = root["sub2api"];
-          const char *sub_title = sub2api_obj["title"] | "Sub2API";
-          const char *sub_value = sub2api_obj["value"] | "--";
-          const char *sub_label = sub2api_obj["label"] | "Token";
-          const char *sub_cost = sub2api_obj["cost"] | "--";
-          sub2api.title = sub_title != nullptr ? sub_title : "Sub2API";
-          sub2api.value = sub_value != nullptr ? sub_value : "--";
-          sub2api.label = sub_label != nullptr ? sub_label : "Token";
-          sub2api.cost = sub_cost != nullptr ? sub_cost : "--";
-          sub2api.requests = sub2api_obj["requests"] | 0;
-          sub2api.enabled = sub2api_obj["enabled"] | -1;
+          JsonObject codex_obj = root["codex"];
+          const char *codex_value = codex_obj["value"] | "--";
+          const char *codex_cost = codex_obj["cost"] | "--";
+          codex.value = codex_value != nullptr ? codex_value : "--";
+          codex.cost = codex_cost != nullptr ? codex_cost : "--";
+          codex.requests = codex_obj["requests"] | 0;
+          codex.enabled = codex_obj["enabled"] | -1;
+          codex.value_numeric = codex_obj["value_numeric"] | 0;
 
           JsonObject total_obj = root["total"];
-          const char *total_title = total_obj["title"] | "Total";
           const char *total_value = total_obj["value"] | "--";
-          const char *total_label = total_obj["label"] | "Token";
           const char *total_cost = total_obj["cost"] | "--";
-          total.title = total_title != nullptr ? total_title : "Total";
           total.value = total_value != nullptr ? total_value : "--";
-          total.label = total_label != nullptr ? total_label : "Token";
           total.cost = total_cost != nullptr ? total_cost : "--";
           total.requests = total_obj["requests"] | 0;
           total.alerts = total_obj["alerts"] | 0;
           total.enabled = -1;
+          total.value_numeric = total_obj["value_numeric"] | 0;
 
           JsonArray claude_array = root["claude_rows"].as<JsonArray>();
           if (!claude_array.isNull()) {
@@ -337,21 +1207,19 @@ display:
               if (claude_row_count >= 2) {
                 break;
               }
-              JsonObject row = row_var.as<JsonObject>();
-              load_row(row, claude_rows[claude_row_count]);
+              load_row(row_var.as<JsonObject>(), claude_rows[claude_row_count]);
               claude_row_count++;
             }
           }
 
-          JsonArray sub2api_array = root["sub2api_rows"].as<JsonArray>();
-          if (!sub2api_array.isNull()) {
-            for (JsonVariant row_var : sub2api_array) {
-              if (sub2api_row_count >= 2) {
+          JsonArray codex_array = root["codex_rows"].as<JsonArray>();
+          if (!codex_array.isNull()) {
+            for (JsonVariant row_var : codex_array) {
+              if (codex_row_count >= 2) {
                 break;
               }
-              JsonObject row = row_var.as<JsonObject>();
-              load_row(row, sub2api_rows[sub2api_row_count]);
-              sub2api_row_count++;
+              load_row(row_var.as<JsonObject>(), codex_rows[codex_row_count]);
+              codex_row_count++;
             }
           }
 
@@ -369,88 +1237,92 @@ display:
 
           JsonObject reset_obj = root["reset_hints"];
           const char *reset_claude_text = reset_obj["claude_five_hour"] | "--";
-          const char *reset_sub2api_text = reset_obj["sub2api_five_hour"] | "--";
+          const char *reset_codex_text = reset_obj["codex_five_hour"] | "--";
           reset_claude = reset_claude_text != nullptr ? reset_claude_text : "--";
-          reset_sub2api = reset_sub2api_text != nullptr ? reset_sub2api_text : "--";
+          reset_codex = reset_codex_text != nullptr ? reset_codex_text : "--";
           return true;
         });
       }
 
-      it.rectangle(10, 10, 780, 48);
-      it.printf(24, 22, id(font_md), "InfoHub EInk");
-      it.printf(260, 22, id(font_sm), "刷新时间 %s", updated_at.c_str());
-
+      std::string status_text = "首次拉取";
       if (!id(last_error_text).empty()) {
-        it.printf(580, 22, id(font_sm), "状态 %s", id(last_error_text).c_str());
-      } else if (!parsed) {
-        it.printf(580, 22, id(font_sm), "状态 首次拉取");
-      } else {
-        it.printf(580, 22, id(font_sm), "状态 正常");
+        status_text = id(last_error_text);
+      } else if (parsed) {
+        status_text = "正常";
       }
 
+      // Overview cards use the live metric globals so routine partial refreshes
+      // only need to update the changing business numbers.
+      claude.value = id(claude_value_live);
+      claude.cost = id(claude_cost_live);
+      claude.requests = id(claude_requests_live);
+      claude.enabled = id(claude_enabled_live);
+
+      codex.value = id(codex_value_live);
+      codex.cost = id(codex_cost_live);
+      codex.requests = id(codex_requests_live);
+      codex.enabled = id(codex_enabled_live);
+
+      total.value = id(total_value_live);
+      total.cost = id(total_cost_live);
+      total.requests = id(total_requests_live);
+      total.alerts = id(total_alerts_live);
+
+      RowData claude_focus = pick_focus_row(claude_rows, claude_row_count);
+      RowData codex_focus = pick_focus_row(codex_rows, codex_row_count);
+      std::string alert_title = "暂无告警";
+      std::string alert_detail;
+      if (alert_count > 0) {
+        split_alert(alert_lines[0], alert_title, alert_detail);
+      }
+
+      Rect frame{9, 9, 782, 462};
+      Rect header{18, 17, 764, 36};
+      Rect overview_claude{18, 58, 248, 130};
+      Rect overview_codex{276, 58, 248, 130};
+      Rect overview_total{534, 58, 248, 130};
+      Rect quota_claude{18, 193, 506, 135};
+      Rect quota_codex{18, 333, 506, 138};
+      Rect system_panel{534, 193, 248, 278};
+      Rect failure_panel{18, 58, 764, 413};
+
+      bool show_low_battery_badge = id(low_battery_active);
+      std::string low_battery_text = "低电量";
+      int low_battery_badge_w = show_low_battery_badge ? badge_width(id(font_badge), low_battery_text, 78, 116, 12) : 0;
+
+      std::string header_status = "状态 " + trim_text(status_text, 10);
+      int status_badge_max_width = show_low_battery_badge ? 132 : 176;
+      int header_badge_w = badge_width(id(font_badge), header_status, 90, status_badge_max_width, 12);
+      Rect header_badge{right_of(header) - 10 - header_badge_w, 21, header_badge_w, 24};
+      Rect low_battery_badge{header_badge.x - 8 - low_battery_badge_w, 21, low_battery_badge_w, 24};
+
+      draw_outline_round_rect(frame, 5);
+      draw_outline_round_rect(header, 4);
+      it.printf(header.x + 10, header.y + 5, id(font_header), "InfoHub");
+      it.printf(header.x + header.w / 2, header.y + 7, id(font_time), TextAlign::TOP_CENTER, "%s", fit_text_width(id(font_time), updated_at, 260).c_str());
+      if (show_low_battery_badge) {
+        draw_badge(low_battery_badge, low_battery_text, false);
+      }
+      draw_badge(header_badge, header_status, true);
+
       if (!parsed) {
-        it.rectangle(16, 80, 768, 384);
+        draw_outline_round_rect(failure_panel, 0);
         if (id(last_payload_body).empty()) {
-          it.printf(36, 118, id(font_title), "等待首次拉取");
-          it.printf(36, 166, id(font_md), "Waiting for device.json");
+          it.printf(failure_panel.x + 20, failure_panel.y + 20, id(font_title), "等待首次拉取");
+          it.printf(failure_panel.x + 20, failure_panel.y + 48, id(font_md), "Waiting for device.json");
         } else {
-          it.printf(36, 118, id(font_title), "数据解析失败");
-          it.printf(36, 166, id(font_md), "Check device.json payload");
+          it.printf(failure_panel.x + 20, failure_panel.y + 20, id(font_title), "数据解析失败");
+          it.printf(failure_panel.x + 20, failure_panel.y + 48, id(font_md), "Check device.json payload");
         }
-        it.printf(36, 222, id(font_sm), "Error: %s", id(last_error_text).empty() ? "--" : id(last_error_text).c_str());
-        it.printf(36, 250, id(font_sm), "Buttons: Force Sync / GPIO3");
+        it.printf(failure_panel.x + 20, failure_panel.y + 88, id(font_sm), "Error: %s", id(last_error_text).empty() ? "--" : trim_text(id(last_error_text), 28).c_str());
+        it.printf(failure_panel.x + 20, failure_panel.y + 108, id(font_sm), "Sync: Force Sync / GPIO3");
         return;
       }
 
-      draw_card(16, 72, 248, "C", claude);
-      draw_card(276, 72, 248, "S", sub2api);
-      draw_card(536, 72, 248, "T", total);
+      draw_overview_card(overview_claude, "Claude", claude);
+      draw_overview_card(overview_codex, "Codex", codex);
+      draw_overview_card(overview_total, "合计", total);
 
-      it.rectangle(16, 180, 376, 134);
-      it.printf(28, 192, id(font_sm), "Claude Relay");
-      it.printf(168, 192, id(font_xs), "5H");
-      it.printf(278, 192, id(font_xs), "Week");
-      if (claude_row_count == 0) {
-        it.printf(28, 224, id(font_sm), "暂无数据");
-      } else {
-        draw_row(24, 212, 360, claude_rows[0]);
-        if (claude_row_count > 1) {
-          draw_row(24, 240, 360, claude_rows[1]);
-        }
-      }
-      it.printf(28, 290, id(font_xs), "%s", trim_ascii(reset_claude, 42).c_str());
-
-      it.rectangle(16, 326, 376, 138);
-      it.printf(28, 338, id(font_sm), "Sub2API");
-      it.printf(168, 338, id(font_xs), "5H");
-      it.printf(278, 338, id(font_xs), "Week");
-      if (sub2api_row_count == 0) {
-        it.printf(28, 370, id(font_sm), "暂无数据");
-      } else {
-        draw_row(24, 358, 360, sub2api_rows[0]);
-        if (sub2api_row_count > 1) {
-          draw_row(24, 386, 360, sub2api_rows[1]);
-        }
-      }
-      it.printf(28, 438, id(font_xs), "%s", trim_ascii(reset_sub2api, 42).c_str());
-
-      it.rectangle(408, 180, 376, 284);
-      it.printf(420, 192, id(font_sm), "告警");
-      if (alert_count == 0) {
-        it.printf(420, 226, id(font_sm), "暂无告警");
-      } else {
-        it.printf(420, 226, id(font_sm), "1. %s", trim_ascii(alert_lines[0], 34).c_str());
-        if (alert_count > 1) {
-          it.printf(420, 256, id(font_sm), "2. %s", trim_ascii(alert_lines[1], 34).c_str());
-        }
-        if (alert_count > 2) {
-          it.printf(420, 286, id(font_sm), "3. %s", trim_ascii(alert_lines[2], 34).c_str());
-        }
-      }
-
-      it.filled_rectangle(420, 326, 344, 1);
-      it.printf(420, 340, id(font_xs), "Requests %d", total.requests);
-      it.printf(420, 364, id(font_xs), "Refresh %d s", refresh_seconds);
-      it.printf(420, 388, id(font_xs), "Sync: Force Sync / GPIO3");
-      it.printf(420, 412, id(font_xs), "Display: 7.50inv2alt + 2ms");
-      it.printf(420, 436, id(font_xs), "Refresh on payload change");
+      draw_quota_card(quota_claude, "Claude 配额", reset_claude, claude_focus, true);
+      draw_quota_card(quota_codex, "Codex 配额", reset_codex, codex_focus, true);
+      draw_system_panel(system_panel, alert_count, alert_title, alert_detail, refresh_seconds);

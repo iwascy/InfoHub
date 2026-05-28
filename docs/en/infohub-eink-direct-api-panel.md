@@ -61,7 +61,10 @@ Key points of this template:
 - `GPIO3` is reserved as a physical manual refresh button
 - `GPIO4` also serves as the wake-up key for nighttime deep sleep
 - A `Force Sync` button is also exposed
+- Pressing `GPIO4` during nighttime deep sleep bypasses quiet hours once, forces one refresh, and then returns to deep sleep until `10:00`
 - Three runtime states are supported: "plugged high-frequency / battery power-saving / battery nighttime silent"
+- Wi-Fi uses `fast_connect: true` and `power_save_mode: HIGH`, with automatic fallback AP startup disabled to reduce battery-mode network power use
+- HTTP request timeout is reduced from `20s` to `10s`, so network failures keep the device awake for less time
 
 ESPHome `secrets.yaml` requires at least these values:
 
@@ -69,6 +72,10 @@ ESPHome `secrets.yaml` requires at least these values:
 wifi_ssid: "YOUR_WIFI"
 wifi_password: "YOUR_WIFI_PASSWORD"
 wifi_fallback_password: "YOUR_FALLBACK_PASSWORD"
+# Optional: pair with manual_ip in the YAML to shorten wake-to-Wi-Fi time
+wifi_static_ip: "10.30.5.173"
+wifi_gateway: "10.30.5.1"
+wifi_subnet: "255.255.255.0"
 esphome_api_encryption_key: "YOUR_ESPHOME_API_KEY"
 esphome_ota_password: "YOUR_OTA_PASSWORD"
 infohub_eink_device_url: "http://10.30.5.172:8080/dashboard/eink/device.json?token=YOUR_DASHBOARD_TOKEN&refresh=300"
@@ -81,10 +88,14 @@ You can also copy directly from [deploy/esphome/secrets.example.yaml](../../depl
 The current API template includes a conservative power-saving strategy:
 
 - Plugged mode: poll every `2min`
-- Battery mode: poll every `5min`
-- Battery nighttime silent: from `22:00` to `10:00` the next day, no API requests — the device enters deep sleep and auto-wakes at `10:00`
+- Battery mode: poll every `15min`
+- Battery voltage/level sampling: update every `2min`
+- Power Profile state: update every `5min`
+- Battery nighttime silent: from `22:00` to `10:00` the next day, no routine API requests — the device enters deep sleep, auto-wakes at `10:00`, or wakes on `GPIO4` for one manual refresh
 - E-paper refresh retains the "only refresh when payload changes" logic, so plugged mode polls more frequently but does not cause repeated screen refreshes for identical content
 - If battery level drops below threshold, the top status bar displays a `Low Battery` indicator
+
+This version still keeps daytime OTA/API available; it does not change battery mode into "fetch once, then immediately deep sleep." If measured battery life is still not enough, switch to the more aggressive daytime periodic wake strategy next.
 
 The template also exposes these entities:
 
@@ -161,7 +172,7 @@ The current version already includes "no requests at night + nighttime deep slee
 
 - Switch daytime battery mode to "wake on schedule, request once, then deep sleep again" — this saves significantly more power than maintaining a Wi-Fi connection
 - If a reliable USB/VBUS detection pin is identified later, replace the current voltage-based approximation with true external power detection for faster switching
-- If the backend collection doesn't change at minute-level frequency, extend `battery_poll_interval` from `5min` to `15min`, `30min`, or longer
+- If the backend collection doesn't change at minute-level frequency, extend `battery_poll_interval` from `15min` to `30min`, `60min`, or longer
 - If only screen content preservation is needed at night without network connectivity, consider disabling Wi-Fi before entering silent mode or entering deep sleep earlier
 
 ## References

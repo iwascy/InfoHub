@@ -61,7 +61,10 @@ curl "http://10.30.5.172:8080/dashboard/eink/device.json?token=YOUR_DASHBOARD_TO
 - `GPIO3` 保留为实体手动刷新按钮
 - `GPIO4` 同时作为夜间 deep sleep 的唤醒键
 - 还额外暴露了一个 `Force Sync` 按钮
+- 夜间 deep sleep 中按下 `GPIO4` 唤醒后，会绕过一次夜间静默、强制刷新一次，然后重新睡到 `10:00`
 - 新增了“插电高实时 / 电池省电 / 电池夜间静默”三种运行状态
+- Wi-Fi 使用 `fast_connect: true` 和 `power_save_mode: HIGH`，并关闭 fallback AP 自动启动，用于减少电池模式下的联网耗电
+- HTTP 请求超时从 `20s` 降到 `10s`，网络异常时少醒着等待
 
 ESPHome 的 `secrets.yaml` 至少要补这些值：
 
@@ -69,6 +72,10 @@ ESPHome 的 `secrets.yaml` 至少要补这些值：
 wifi_ssid: "YOUR_WIFI"
 wifi_password: "YOUR_WIFI_PASSWORD"
 wifi_fallback_password: "YOUR_FALLBACK_PASSWORD"
+# 可选：配合 YAML 中 manual_ip 使用，用于缩短唤醒后联网时间
+wifi_static_ip: "10.30.5.173"
+wifi_gateway: "10.30.5.1"
+wifi_subnet: "255.255.255.0"
 esphome_api_encryption_key: "YOUR_ESPHOME_API_KEY"
 esphome_ota_password: "YOUR_OTA_PASSWORD"
 infohub_eink_device_url: "http://10.30.5.172:8080/dashboard/eink/device.json?token=YOUR_DASHBOARD_TOKEN&refresh=300"
@@ -81,10 +88,14 @@ infohub_eink_device_url: "http://10.30.5.172:8080/dashboard/eink/device.json?tok
 当前仓库里的 API 模板已经内置一套偏稳妥的省电策略：
 
 - 插电模式：每 `2min` 请求一次
-- 电池模式：每 `5min` 请求一次
-- 电池夜间静默：`22:00` 到次日 `10:00` 不请求业务接口，并直接进入 deep sleep，等到 `10:00` 自动唤醒
+- 电池模式：每 `15min` 请求一次
+- 电池电压/电量采样：每 `2min` 更新一次
+- Power Profile 状态：每 `5min` 更新一次
+- 电池夜间静默：`22:00` 到次日 `10:00` 不请求业务接口，并直接进入 deep sleep；等到 `10:00` 自动唤醒，或按 `GPIO4` 手动唤醒并刷新一次
 - 电子纸刷新仍然保留“只有 payload 变化才刷新”的逻辑，所以插电模式虽然请求更频繁，但不会因为同一份内容反复刷屏
 - 如果电量低于阈值，顶部状态栏会额外显示 `低电量` 标识
+
+这版仍保留白天 OTA/API 可用，没有把白天电池模式改成“拉取后立即 deep sleep”。如果实测续航仍不够，再切到更激进的白天周期唤醒方案。
 
 另外，模板还会额外暴露这些实体：
 
@@ -161,7 +172,7 @@ infohub_eink_device_url: "http://10.30.5.172:8080/dashboard/eink/device.json?tok
 
 - 把白天电池模式也改成“定时唤醒后请求一次，再次 deep sleep”，省电幅度会比常驻 Wi‑Fi 再大一截
 - 如果后面确认到稳定可用的 USB/VBUS 检测脚位，可以把现在的电压近似判断改成真正的外部供电检测，切换会更准
-- 如果你确定后端采集本身不是分钟级变化，可以把 `battery_poll_interval` 从 `5min` 再拉长到 `15min`、`30min` 或更长
+- 如果你确定后端采集本身不是分钟级变化，可以把 `battery_poll_interval` 从 `15min` 再拉长到 `30min`、`60min` 或更长
 - 如果夜间只需要保留画面、不需要联机，可以进一步评估在进入静默前主动关 Wi‑Fi 或更早进入 deep sleep
 
 ## 参考资料
