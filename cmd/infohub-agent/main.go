@@ -20,11 +20,29 @@ const agentVersion = "0.1.0"
 func main() {
 	configPath := flag.String("config", defaultConfigPath(), "path to agent config file")
 	once := flag.Bool("once", false, "run a single scan/push cycle and exit")
+	printUsage := flag.Bool("print", false, "scan local usage and print it to stdout (no server required)")
+	printJSON := flag.Bool("json", false, "with -print: output raw data items as JSON")
 	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
 
 	if *showVersion {
 		fmt.Println("infohub-agent", agentVersion)
+		return
+	}
+
+	if *printUsage {
+		cfg, err := agent.LoadPrintConfig(*configPath)
+		if err != nil {
+			slog.Error("load agent config failed", "error", err)
+			os.Exit(1)
+		}
+		logger := newLogger("warn")
+		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+		defer stop()
+		if err := agent.PrintLocalUsage(ctx, cfg, logger, os.Stdout, *printJSON); err != nil {
+			logger.Error("print local usage failed", "error", err)
+			os.Exit(1)
+		}
 		return
 	}
 

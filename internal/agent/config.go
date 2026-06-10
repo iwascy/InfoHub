@@ -49,6 +49,39 @@ func (s ServerConfig) Timeout() time.Duration {
 }
 
 func LoadConfig(path string) (Config, error) {
+	cfg, err := parseConfig(path)
+	if err != nil {
+		return cfg, err
+	}
+	if err := cfg.validate(); err != nil {
+		return cfg, err
+	}
+	return cfg, nil
+}
+
+// LoadPrintConfig loads configuration for local print mode, where no server
+// is contacted: the config file is optional (defaults apply, with online
+// quota lookups enabled) and server.base_url is not required.
+func LoadPrintConfig(path string) (Config, error) {
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		var cfg Config
+		cfg.ClaudeQuota.Enabled = true
+		cfg.CodexQuota.Enabled = true
+		cfg.applyDefaults()
+		return cfg, nil
+	}
+
+	cfg, err := parseConfig(path)
+	if err != nil {
+		return cfg, err
+	}
+	if err := cfg.validateSources(); err != nil {
+		return cfg, err
+	}
+	return cfg, nil
+}
+
+func parseConfig(path string) (Config, error) {
 	var cfg Config
 
 	if err := config.LoadDotEnv(path); err != nil {
@@ -65,9 +98,6 @@ func LoadConfig(path string) (Config, error) {
 	}
 
 	cfg.applyDefaults()
-	if err := cfg.validate(); err != nil {
-		return cfg, err
-	}
 	return cfg, nil
 }
 
@@ -121,6 +151,10 @@ func (c Config) validate() error {
 	if strings.TrimSpace(c.MachineID) == "" {
 		return fmt.Errorf("machine_id is required (hostname lookup failed)")
 	}
+	return c.validateSources()
+}
+
+func (c Config) validateSources() error {
 	for name := range c.Sources {
 		if name != "claude_local" && name != "codex_local" {
 			return fmt.Errorf("unsupported source %q (claude_local / codex_local)", name)

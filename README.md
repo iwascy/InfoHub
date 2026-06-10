@@ -237,6 +237,15 @@ cp deploy/agent/com.infohub.agent.plist ~/Library/LaunchAgents/
 launchctl load ~/Library/LaunchAgents/com.infohub.agent.plist
 ```
 
+### 本机查看用量（无需服务器）
+
+```bash
+infohub-agent -print          # 人类可读输出：今日/5H/周用量、配额、Top 模型
+infohub-agent -print -json    # 原始 DataItem JSON（便于脚本处理）
+```
+
+`-print` 直接扫描本机 JSONL（含在线配额查询），与服务端统计口径一致；配置文件缺失时使用默认路径，开箱即用。
+
 说明：
 
 - 去重以 `(machine, source, file_path, byte_offset)` 为键，agent 状态文件丢失或重复推送都不会重复计数；推送失败时游标不前移，下次自动补传。
