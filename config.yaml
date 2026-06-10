@@ -2,6 +2,9 @@ server:
   port: ${INFOHUB_PORT}
   auth_token: "${INFOHUB_AUTH_TOKEN}"
   dashboard_token: "${INFOHUB_DASHBOARD_TOKEN}"
+  # Token presented by infohub-agent on POST /api/v1/ingest/local-usage.
+  # Falls back to auth_token when empty.
+  ingest_token: "${INFOHUB_INGEST_TOKEN}"
   mock_enabled: ${INFOHUB_MOCK_ENABLED}
   read_timeout_seconds: 10
   write_timeout_seconds: 10
@@ -86,7 +89,11 @@ collectors:
     paths:
       - "${HOME}/.config/claude/projects"
       - "${HOME}/.claude/projects"
+    # builtin: scan local JSONL files | ccusage: shell out to ccusage CLI
+    # remote: aggregate records pushed by infohub-agent (requires sqlite store;
+    #         set online.enabled false and run the agent on dev machines)
     mode: "builtin"
+    # remote_quota_stale_seconds: 1800  # max age of agent-reported quota in remote mode
     online:
       enabled: true  # Read-only OAuth usage query; does not modify Claude Code config.
       # auth_path: "${HOME}/.claude/.credentials.json"
@@ -105,7 +112,9 @@ collectors:
     timeout_seconds: 15
     paths:
       - "${HOME}/.codex/sessions"
+    # builtin: scan local JSONL files | remote: aggregate agent-pushed records
     mode: "builtin"
+    # remote_quota_stale_seconds: 1800
     online:
       enabled: true  # Uses ~/.codex/auth.json as an online 5H / Week quota fallback.
       # auth_path: "${HOME}/.codex/auth.json"

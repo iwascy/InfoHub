@@ -253,7 +253,7 @@ func TestDashboardRouteUsesDedicatedToken(t *testing.T) {
 	dataStore := store.NewMemoryStore()
 	registry := collector.NewRegistry()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	router := NewRouter(dataStore, registry, nil, logger, "api-token", "view-token", false, DashboardSources{})
+	router := NewRouter(dataStore, registry, nil, logger, "api-token", "view-token", "", false, DashboardSources{})
 
 	t.Run("rejects missing dashboard token", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/dashboard/eink", nil)

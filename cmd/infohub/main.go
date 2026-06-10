@@ -41,7 +41,7 @@ func main() {
 	}()
 
 	registry := collector.NewRegistry()
-	registerCollectors(registry, logger, cfg)
+	registerCollectors(registry, logger, cfg, dataStore)
 
 	taskScheduler, err := scheduler.New(registry, dataStore, logger, cfg.ScheduleConfig())
 	if err != nil {
@@ -56,7 +56,7 @@ func main() {
 	taskScheduler.RunAllNow(initialCtx)
 	cancelInitial()
 
-	handler := api.NewRouter(dataStore, registry, taskScheduler, logger, cfg.Server.AuthToken, cfg.Server.DashboardToken, cfg.Server.MockEnabled, api.DashboardSources{
+	handler := api.NewRouter(dataStore, registry, taskScheduler, logger, cfg.Server.AuthToken, cfg.Server.DashboardToken, cfg.Server.EffectiveIngestToken(), cfg.Server.MockEnabled, api.DashboardSources{
 		Claude: cfg.Dashboard.Sources.Claude,
 		Codex:  cfg.Dashboard.Sources.Codex,
 	})
@@ -87,7 +87,7 @@ func main() {
 	}
 }
 
-func registerCollectors(registry *collector.Registry, logger *slog.Logger, cfg config.Config) {
+func registerCollectors(registry *collector.Registry, logger *slog.Logger, cfg config.Config, dataStore store.Store) {
 	if cfg.Collectors.ClaudeRelay.Enabled {
 		registry.Register(collector.NewClaudeRelayCollector(cfg.Collectors.ClaudeRelay, logger))
 	}
@@ -99,14 +99,26 @@ func registerCollectors(registry *collector.Registry, logger *slog.Logger, cfg c
 	}
 	if cfg.Collectors.ClaudeLocal.Enabled {
 		claudeCollector := collector.NewClaudeLocalCollector(cfg.Collectors.ClaudeLocal, logger)
-		if cfg.Collectors.ClaudeLocal.Online.Enabled {
+		if cfg.Collectors.ClaudeLocal.IsRemote() {
+			// Claude quota comes from agent-reported observations; the server
+			// itself has no OAuth credentials in a remote setup.
+			if ingestStore, ok := dataStore.(store.IngestStore); ok {
+				claudeCollector.SetClaudeQuotaFetcher(collector.NewStoreQuotaFetcher(ingestStore, "claude_local", cfg.Collectors.ClaudeLocal.RemoteQuotaStale()))
+			}
+		} else if cfg.Collectors.ClaudeLocal.Online.Enabled {
 			claudeCollector.SetClaudeOnlineQuotaClient(collector.NewClaudeOnlineQuotaClient(cfg.Collectors.ClaudeLocal.Online, logger))
 		}
 		registry.Register(claudeCollector)
 	}
 	if cfg.Collectors.CodexLocal.Enabled {
 		codexCollector := collector.NewCodexLocalCollector(cfg.Collectors.CodexLocal, logger)
-		if cfg.Collectors.CodexLocal.Online.Enabled {
+		if cfg.Collectors.CodexLocal.IsRemote() {
+			// Gap-filler when the quota embedded in pushed records has
+			// expired (idle machine); observations also come from the agent.
+			if ingestStore, ok := dataStore.(store.IngestStore); ok {
+				codexCollector.SetCodexQuotaFetcher(collector.NewStoreQuotaFetcher(ingestStore, "codex_local", cfg.Collectors.CodexLocal.RemoteQuotaStale()))
+			}
+		} else if cfg.Collectors.CodexLocal.Online.Enabled {
 			codexCollector.SetCodexOnlineQuotaClient(collector.NewCodexOnlineQuotaClient(cfg.Collectors.CodexLocal.Online, logger))
 		}
 		registry.Register(codexCollector)

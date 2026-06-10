@@ -5,13 +5,21 @@ ESPHOME_ENV_FILE := deploy/esphome/docker/.env
 ESPHOME_ENV_ARG := $(if $(wildcard $(ESPHOME_ENV_FILE)),--env-file $(ESPHOME_ENV_FILE),)
 ESPHOME_COMPOSE := docker $(DOCKER_CONTEXT_ARG) compose -f deploy/esphome/docker/compose.yaml $(ESPHOME_ENV_ARG)
 
-.PHONY: build run fmt test tidy esphome-config esphome-up esphome-down esphome-logs esphome-ps esphome-pull esphome-compile-stage1 esphome-compile-stage1-alt esphome-compile-stage2 esphome-compile-partial-probe esphome-recreate
+.PHONY: build build-agent build-all run run-agent fmt test tidy esphome-config esphome-up esphome-down esphome-logs esphome-ps esphome-pull esphome-compile-stage1 esphome-compile-stage1-alt esphome-compile-stage2 esphome-compile-partial-probe esphome-recreate
 
 build:
 	go build -o bin/$(APP) ./cmd/infohub
 
+build-agent:
+	go build -o bin/$(APP)-agent ./cmd/infohub-agent
+
+build-all: build build-agent
+
 run:
 	go run ./cmd/infohub -config config.yaml
+
+run-agent:
+	go run ./cmd/infohub-agent -once
 
 fmt:
 	gofmt -w $$(find . -name '*.go' -not -path './vendor/*')

@@ -323,7 +323,7 @@ func decodeClaudeOnlineRateLimits(body io.Reader) (localRateLimits, bool, error)
 		FiveHour: extractClaudeOnlineRateLimit(payload, "five_hour"),
 		Week:     extractClaudeOnlineRateLimit(payload, "seven_day"),
 	}
-	return limits, limits.hasAny(), nil
+	return limits, limits.HasAny(), nil
 }
 
 func extractClaudeOnlineRateLimit(payload map[string]any, key string) localQuotaObservation {
@@ -345,7 +345,7 @@ func extractClaudeOnlineRateLimit(payload map[string]any, key string) localQuota
 func (c *ClaudeOnlineQuotaClient) cachedResult(now time.Time) (localRateLimits, bool) {
 	c.lastResultM.RLock()
 	defer c.lastResultM.RUnlock()
-	if c.lastResult.at.IsZero() || !c.lastResult.limits.hasAny() {
+	if c.lastResult.at.IsZero() || !c.lastResult.limits.HasAny() {
 		return localRateLimits{}, false
 	}
 	return c.lastResult.limits, now.Before(c.lastResult.at.Add(c.staleAfter))

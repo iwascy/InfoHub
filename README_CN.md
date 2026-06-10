@@ -128,6 +128,7 @@ log:
 | `INFOHUB_PORT` | HTTP 服务端口 | `8080` |
 | `INFOHUB_AUTH_TOKEN` | API Bearer Token；为空时 API 不启用鉴权 | 空 |
 | `INFOHUB_DASHBOARD_TOKEN` | 仪表盘查询参数 token；为空时只依赖 API token 或不鉴权 | 空 |
+| `INFOHUB_INGEST_TOKEN` | infohub-agent 上报接口专用 token；为空时回退 `INFOHUB_AUTH_TOKEN` | 空 |
 | `INFOHUB_MOCK_ENABLED` | 是否让仪表盘返回模拟数据 | `false` |
 | `INFOHUB_STORE_TYPE` | 存储后端：`sqlite` 或 `memory` | `sqlite` |
 | `INFOHUB_SQLITE_PATH` | SQLite 数据库文件路径 | `./data/infohub.db` |
@@ -145,6 +146,7 @@ log:
 | `GET` | `/api/v1/source/{name}` | 指定数据源的快照 |
 | `GET` | `/api/v1/health` | 采集器状态和最近采集时间 |
 | `POST` | `/api/v1/collect/{name}` | 手动触发指定采集器 |
+| `POST` | `/api/v1/ingest/local-usage` | infohub-agent 用量上报（Bearer ingest token） |
 | `GET` | `/dashboard/eink` | HTML 电子墨水屏仪表盘 |
 | `GET` | `/dashboard/eink.json` | 仪表盘调试 JSON |
 | `GET` | `/dashboard/eink/device.json` | ESPHome 设备直连 JSON |
@@ -189,18 +191,74 @@ log:
 }
 ```
 
+## 远程开发机上报（infohub-agent）
+
+当 infohub 部署在服务器上时，服务端进程读不到开发机本地的 Claude Code / Codex JSONL。`infohub-agent` 是配套的轻量上报进程：在每台开发机上增量扫描本机 JSONL（含本机 Claude OAuth 配额查询），推送到服务端的 ingest 接口；服务端以 `machine_id` 维度存储并跨机器汇总，墨水屏链路保持不变。
+
+```
+开发机 A ── infohub-agent ──┐
+开发机 B ── infohub-agent ──┼──► POST /api/v1/ingest/local-usage ──► infohub（mode: remote）──► 墨水屏
+                            │      Bearer INFOHUB_INGEST_TOKEN
+```
+
+### 服务端配置
+
+```yaml
+server:
+  ingest_token: "${INFOHUB_INGEST_TOKEN}"   # 为空时回退 auth_token
+
+collectors:
+  claude_local:
+    enabled: true
+    mode: "remote"          # 不扫本地文件，聚合 agent 上报的数据
+    online:
+      enabled: false        # 服务器上没有 OAuth 凭据
+  codex_local:
+    enabled: true
+    mode: "remote"
+```
+
+要求 `store.type: sqlite`。Claude 的 5h/周配额由 agent 在开发机上查询并随数据上报（`remote_quota_stale_seconds`，默认 1800 秒内有效）；Codex 配额内嵌在 JSONL 记录中随记录上传。
+
+### 开发机安装（macOS）
+
+```bash
+make build-agent
+cp bin/infohub-agent /usr/local/bin/
+mkdir -p ~/.config/infohub-agent
+cp deploy/agent/config.example.yaml ~/.config/infohub-agent/config.yaml
+# 编辑 config.yaml：server.base_url 与 ingest_token
+
+# 先交互式跑一次（完成 Keychain 授权并全量补传历史数据）
+infohub-agent -once
+
+# 用 LaunchAgent 每 5 分钟定时上报
+cp deploy/agent/com.infohub.agent.plist ~/Library/LaunchAgents/
+launchctl load ~/Library/LaunchAgents/com.infohub.agent.plist
+```
+
+说明：
+
+- 去重以 `(machine, source, file_path, byte_offset)` 为键，agent 状态文件丢失或重复推送都不会重复计数；推送失败时游标不前移，下次自动补传。
+- **同一台机器不要同时**跑 `mode: builtin` 的本地扫描和 agent 上报同一份目录，否则会双重计数（builtin 写入 `machine=''`，agent 写入自己的 `machine_id`）。
+- 多台机器可共用一个 ingest token，靠 `machine_id`（默认 hostname）区分。
+
 ## 项目结构
 
 ```
 cmd/infohub/          程序入口，服务启动
+cmd/infohub-agent/    开发机上报 agent 入口
 internal/
-  api/                HTTP 处理器、中间件、仪表盘渲染
+  agent/              上报 agent：增量扫描、状态文件、推送客户端
+  api/                HTTP 处理器、中间件、仪表盘渲染、ingest 接口
   collector/          采集器接口及实现
   config/             YAML 配置、.env 读取与环境变量展开
+  localscan/          Claude/Codex JSONL 解析与增量扫描（服务端与 agent 共享）
   model/              数据模型（DataItem、SourceSnapshot）
   scheduler/          基于 Cron 的任务调度
   store/              存储接口（SQLite、内存）
 deploy/
+  agent/              infohub-agent 配置示例与 launchd plist
   esphome/            ESPHome 设备配置（电子墨水屏）
 docs/
   zh/                 中文专题文档

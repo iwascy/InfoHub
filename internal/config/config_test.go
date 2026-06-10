@@ -213,3 +213,65 @@ func writeTempConfig(t *testing.T, content string) string {
 	}
 	return path
 }
+
+func TestEffectiveIngestTokenFallback(t *testing.T) {
+	configPath := writeTempConfig(t, `
+server:
+  auth_token: "api-token"
+`)
+
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatalf("load config failed: %v", err)
+	}
+	if got := cfg.Server.EffectiveIngestToken(); got != "api-token" {
+		t.Fatalf("expected fallback to auth_token, got %q", got)
+	}
+
+	configPath = writeTempConfig(t, `
+server:
+  auth_token: "api-token"
+  ingest_token: "ingest-token"
+`)
+	cfg, err = Load(configPath)
+	if err != nil {
+		t.Fatalf("load config failed: %v", err)
+	}
+	if got := cfg.Server.EffectiveIngestToken(); got != "ingest-token" {
+		t.Fatalf("expected dedicated ingest token, got %q", got)
+	}
+}
+
+func TestRemoteModeRequiresSQLiteStore(t *testing.T) {
+	configPath := writeTempConfig(t, `
+store:
+  type: memory
+collectors:
+  claude_local:
+    enabled: true
+    mode: remote
+`)
+
+	if _, err := Load(configPath); err == nil {
+		t.Fatal("expected error for remote mode with memory store")
+	}
+
+	configPath = writeTempConfig(t, `
+store:
+  type: sqlite
+collectors:
+  claude_local:
+    enabled: true
+    mode: remote
+`)
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatalf("load config failed: %v", err)
+	}
+	if !cfg.Collectors.ClaudeLocal.IsRemote() {
+		t.Fatal("expected claude_local IsRemote() to be true")
+	}
+	if cfg.Collectors.ClaudeLocal.RemoteQuotaStaleSeconds != 1800 {
+		t.Fatalf("unexpected remote_quota_stale_seconds default: %d", cfg.Collectors.ClaudeLocal.RemoteQuotaStaleSeconds)
+	}
+}

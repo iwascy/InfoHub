@@ -31,6 +31,7 @@ type LocalParseState struct {
 }
 
 type LocalUsageRecord struct {
+	Machine        string // "" for scans done by the infohub process itself
 	Source         string
 	FilePath       string
 	ByteOffset     int64
@@ -52,6 +53,26 @@ type LocalUsageStateStore interface {
 	LoadLocalParseStates(source string) (map[string]LocalParseState, error)
 	SaveLocalUsageBatch(source string, states []LocalParseState, records []LocalUsageRecord) error
 	ListLocalUsageRecords(source string, start time.Time, end time.Time) ([]LocalUsageRecord, error)
+}
+
+// AgentQuotaObservation is a rate-limit snapshot reported by a remote
+// infohub-agent (e.g. Claude OAuth usage fetched on the developer machine).
+type AgentQuotaObservation struct {
+	Machine        string
+	Source         string
+	Quota5hUsed    float64 // -1 if unknown
+	Quota5hReset   string
+	QuotaWeekUsed  float64 // -1 if unknown
+	QuotaWeekReset string
+	ObservedAt     time.Time
+	AgentVersion   string
+}
+
+// IngestStore persists usage data pushed by remote infohub-agent processes.
+type IngestStore interface {
+	SaveIngestedUsage(machine, source string, resetFiles []string, records []LocalUsageRecord) error
+	SaveAgentQuotaObservation(obs AgentQuotaObservation) error
+	LatestAgentQuotaObservation(source string) (AgentQuotaObservation, bool, error)
 }
 
 func New(cfg config.StoreConfig) (Store, error) {

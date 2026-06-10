@@ -1,0 +1,50 @@
+# infohub-agent 配置示例
+# 默认路径：~/.config/infohub-agent/config.yaml
+# 同目录下的 .env 会先加载，再展开 ${VAR} 环境变量。
+
+server:
+  # infohub 服务端地址
+  base_url: "http://your-server:8080"
+  # 对应服务端 server.ingest_token（未配置时为 server.auth_token）
+  ingest_token: "${INFOHUB_INGEST_TOKEN}"
+  timeout_seconds: 15
+
+# 聚合维度；留空时默认取 hostname
+machine_id: ""
+
+# 常驻模式下的扫描间隔（秒）；用 launchd/cron + -once 时忽略
+interval_seconds: 300
+
+# 增量扫描游标状态文件；留空默认 ~/.local/state/infohub-agent/state.json
+state_path: ""
+
+sources:
+  claude_local:
+    enabled: true
+    paths:
+      - "${HOME}/.config/claude/projects"
+      - "${HOME}/.claude/projects"
+  codex_local:
+    enabled: true
+    paths:
+      - "${HOME}/.codex/sessions"
+
+# Claude 5h/周配额：从本机 Keychain（"Claude Code-credentials"）或
+# ~/.claude/.credentials.json 读取 OAuth token 后查询官方用量接口，
+# 随上报附带给服务端。只读操作，不会修改 Claude Code 配置。
+# 注意：若 Keychain 中的 accessToken 已过期（Claude Code 未回写），
+# 配额会跳过上报，墨水屏回退到估算值。
+claude_quota:
+  enabled: true
+  # auth_path: "${HOME}/.claude/.credentials.json"
+  # timeout_seconds: 8
+
+# Codex 5h/周配额兜底：记录中内嵌的配额过期（机器闲置）时，
+# 用 ~/.codex/auth.json 在线查询并随上报附带。
+codex_quota:
+  enabled: true
+  # auth_path: "${HOME}/.codex/auth.json"
+  # timeout_seconds: 8
+
+log:
+  level: "info"

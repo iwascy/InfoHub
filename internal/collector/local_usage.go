@@ -1,32 +1,31 @@
 package collector
 
 import (
-	"bufio"
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
-	"io/fs"
 	"log/slog"
-	"os"
 	"os/exec"
-	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
 	"infohub/internal/config"
+	"infohub/internal/localscan"
 	"infohub/internal/model"
 	"infohub/internal/store"
 )
 
 const (
-	localClaudeSource = "claude_local"
-	localCodexSource  = "codex_local"
+	localClaudeSource = localscan.SourceClaude
+	localCodexSource  = localscan.SourceCodex
+)
 
-	localClaudeParserVersion = 1
-	localCodexParserVersion  = 1
+// Parsing/scanning lives in internal/localscan so the infohub-agent binary
+// can reuse it; the aliases keep this package's historical names working.
+type (
+	localUsageEvent       = localscan.Event
+	localQuotaObservation = localscan.QuotaObservation
+	localRateLimits       = localscan.RateLimits
 )
 
 type LocalUsageCollector struct {
@@ -44,18 +43,6 @@ type onlineQuotaFetcher interface {
 	LastStatus() string
 }
 
-type localUsageEvent struct {
-	At            time.Time
-	Model         string
-	Input         float64
-	Output        float64
-	CacheRead     float64
-	CacheCreation float64
-	Reasoning     float64
-	Total         float64
-	Quota         localRateLimits
-}
-
 type localUsageBucket struct {
 	Tokens        float64
 	Input         float64
@@ -65,17 +52,6 @@ type localUsageBucket struct {
 	Reasoning     float64
 	Messages      float64
 	Models        map[string]float64
-}
-
-type localQuotaObservation struct {
-	OK          bool
-	UsedPercent float64
-	ResetAt     string
-}
-
-type localRateLimits struct {
-	FiveHour localQuotaObservation
-	Week     localQuotaObservation
 }
 
 type localWindow struct {
@@ -114,6 +90,18 @@ func (c *LocalUsageCollector) SetClaudeOnlineQuotaClient(client *ClaudeOnlineQuo
 	c.onlineClaudeQuota = client
 }
 
+// SetClaudeQuotaFetcher injects an alternative quota source (e.g. the
+// store-backed fetcher used in remote mode).
+func (c *LocalUsageCollector) SetClaudeQuotaFetcher(fetcher onlineQuotaFetcher) {
+	c.onlineClaudeQuota = fetcher
+}
+
+// SetCodexQuotaFetcher injects an alternative gap-filling quota source for
+// codex (e.g. the store-backed fetcher used in remote mode).
+func (c *LocalUsageCollector) SetCodexQuotaFetcher(fetcher onlineQuotaFetcher) {
+	c.onlineCodexQuota = fetcher
+}
+
 func (c *LocalUsageCollector) Collect(ctx context.Context) ([]model.DataItem, error) {
 	events, err := c.collectEvents(ctx)
 	if err != nil {
@@ -140,8 +128,23 @@ func (c *LocalUsageCollector) collectEvents(ctx context.Context) ([]localUsageEv
 			c.logger.Warn("ccusage local collector failed; fallback to builtin", "source", c.source, "error", err)
 		}
 		return c.scanBuiltin(ctx)
+	case "remote":
+		// No filesystem scan: aggregate records pushed by infohub-agent.
+		if c.store == nil {
+			return nil, fmt.Errorf("%s remote mode requires a sqlite store", c.source)
+		}
+		return c.readStoredEvents()
 	default:
 		return nil, fmt.Errorf("unsupported %s mode %q", c.source, c.cfg.Mode)
+	}
+}
+
+func (c *LocalUsageCollector) scanner() *localscan.Scanner {
+	return &localscan.Scanner{
+		Source: c.source,
+		Paths:  c.cfg.Paths,
+		Logger: c.logger,
+		Now:    c.now,
 	}
 }
 
@@ -149,150 +152,18 @@ func (c *LocalUsageCollector) scanBuiltin(ctx context.Context) ([]localUsageEven
 	if c.store != nil {
 		return c.scanBuiltinIncremental(ctx)
 	}
-
-	paths := c.expandedPaths()
-	if len(paths) == 0 {
-		return nil, fmt.Errorf("%s path missing", strings.TrimSuffix(c.source, "_local"))
-	}
-
-	var (
-		events   []localUsageEvent
-		foundDir bool
-	)
-	for _, root := range paths {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-
-		info, err := os.Stat(root)
-		if err != nil {
-			if os.IsNotExist(err) {
-				continue
-			}
-			return nil, fmt.Errorf("stat %s: %w", root, err)
-		}
-		if !info.IsDir() {
-			continue
-		}
-		foundDir = true
-
-		walkErr := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
-			if err != nil {
-				return nil
-			}
-			if ctxErr := ctx.Err(); ctxErr != nil {
-				return ctxErr
-			}
-			if entry.IsDir() || filepath.Ext(path) != ".jsonl" {
-				return nil
-			}
-
-			fileEvents, err := c.parseJSONL(path)
-			if err != nil && c.logger != nil {
-				c.logger.Debug("skip local usage file", "source", c.source, "path", path, "error", err)
-			}
-			events = append(events, fileEvents...)
-			return nil
-		})
-		if walkErr != nil {
-			return nil, walkErr
-		}
-	}
-
-	if !foundDir {
-		return nil, fmt.Errorf("%s path missing", strings.TrimSuffix(c.source, "_local"))
-	}
-
-	return events, nil
+	return c.scanner().ScanFull(ctx)
 }
 
 func (c *LocalUsageCollector) scanBuiltinIncremental(ctx context.Context) ([]localUsageEvent, error) {
-	paths := c.expandedPaths()
-	if len(paths) == 0 {
-		return nil, fmt.Errorf("%s path missing", strings.TrimSuffix(c.source, "_local"))
-	}
-
 	states, err := c.store.LoadLocalParseStates(c.source)
 	if err != nil {
 		return nil, err
 	}
 
-	var (
-		nextStates []store.LocalParseState
-		records    []store.LocalUsageRecord
-		foundDir   bool
-	)
-	for _, root := range paths {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-
-		info, err := os.Stat(root)
-		if err != nil {
-			if os.IsNotExist(err) {
-				continue
-			}
-			return nil, fmt.Errorf("stat %s: %w", root, err)
-		}
-		if !info.IsDir() {
-			continue
-		}
-		foundDir = true
-
-		walkErr := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
-			if err != nil {
-				return nil
-			}
-			if ctxErr := ctx.Err(); ctxErr != nil {
-				return ctxErr
-			}
-			if entry.IsDir() || filepath.Ext(path) != ".jsonl" {
-				return nil
-			}
-
-			info, err := entry.Info()
-			if err != nil {
-				return nil
-			}
-			offset := int64(0)
-			reset := false
-			if state, ok := states[path]; ok {
-				offset = state.ByteOffset
-				if info.Size() < offset || info.ModTime().UnixNano() < state.MTimeUnix || state.ParserVersion != c.parserVersion() {
-					offset = 0
-					reset = true
-				}
-			}
-			if info.Size() == offset && !reset {
-				return nil
-			}
-
-			fileRecords, nextOffset, err := c.parseJSONLRecords(path, offset)
-			if err != nil {
-				if c.logger != nil {
-					c.logger.Debug("skip local usage file", "source", c.source, "path", path, "error", err)
-				}
-				return nil
-			}
-			records = append(records, fileRecords...)
-			nextStates = append(nextStates, store.LocalParseState{
-				Source:        c.source,
-				FilePath:      path,
-				ByteOffset:    nextOffset,
-				MTimeUnix:     info.ModTime().UnixNano(),
-				UpdatedAt:     c.now().Unix(),
-				ParserVersion: c.parserVersion(),
-				Reset:         reset,
-			})
-			return nil
-		})
-		if walkErr != nil {
-			return nil, walkErr
-		}
-	}
-
-	if !foundDir {
-		return nil, fmt.Errorf("%s path missing", strings.TrimSuffix(c.source, "_local"))
+	nextStates, records, err := c.scanner().ScanIncremental(ctx, states)
+	if err != nil {
+		return nil, err
 	}
 
 	if len(nextStates) > 0 || len(records) > 0 {
@@ -301,6 +172,10 @@ func (c *LocalUsageCollector) scanBuiltinIncremental(ctx context.Context) ([]loc
 		}
 	}
 
+	return c.readStoredEvents()
+}
+
+func (c *LocalUsageCollector) readStoredEvents() ([]localUsageEvent, error) {
 	start, end := c.recordQueryRange()
 	storedRecords, err := c.store.ListLocalUsageRecords(c.source, start, end)
 	if err != nil {
@@ -308,28 +183,7 @@ func (c *LocalUsageCollector) scanBuiltinIncremental(ctx context.Context) ([]loc
 	}
 	events := make([]localUsageEvent, 0, len(storedRecords))
 	for _, record := range storedRecords {
-		events = append(events, localUsageEvent{
-			At:            record.At,
-			Model:         record.Model,
-			Input:         record.Input,
-			Output:        record.Output,
-			CacheRead:     record.CacheRead,
-			CacheCreation: record.CacheCreation,
-			Reasoning:     record.Reasoning,
-			Total:         record.Total,
-			Quota: localRateLimits{
-				FiveHour: localQuotaObservation{
-					OK:          record.Quota5hUsed >= 0,
-					UsedPercent: record.Quota5hUsed,
-					ResetAt:     record.Quota5hReset,
-				},
-				Week: localQuotaObservation{
-					OK:          record.QuotaWeekUsed >= 0,
-					UsedPercent: record.QuotaWeekUsed,
-					ResetAt:     record.QuotaWeekReset,
-				},
-			},
-		})
+		events = append(events, localscan.EventFromRecord(record))
 	}
 	return events, nil
 }
@@ -353,98 +207,6 @@ func (c *LocalUsageCollector) recordQueryRange() (time.Time, time.Time) {
 	return start, end
 }
 
-func (c *LocalUsageCollector) parseJSONL(path string) ([]localUsageEvent, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
-
-	scanner := bufio.NewScanner(file)
-	scanner.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
-
-	var events []localUsageEvent
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
-			continue
-		}
-
-		var payload any
-		decoder := json.NewDecoder(strings.NewReader(line))
-		decoder.UseNumber()
-		if err := decoder.Decode(&payload); err != nil {
-			continue
-		}
-
-		event, ok := c.extractEvent(payload)
-		if ok {
-			events = append(events, event)
-		}
-	}
-	if err := scanner.Err(); err != nil {
-		return events, err
-	}
-	return events, nil
-}
-
-func (c *LocalUsageCollector) parseJSONLRecords(path string, offset int64) ([]store.LocalUsageRecord, int64, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return nil, offset, err
-	}
-	defer file.Close()
-
-	if offset > 0 {
-		if _, err := file.Seek(offset, io.SeekStart); err != nil {
-			return nil, offset, err
-		}
-	}
-
-	reader := bufio.NewReaderSize(file, 256*1024)
-	currentOffset := offset
-	var records []store.LocalUsageRecord
-	for {
-		lineOffset := currentOffset
-		line, err := reader.ReadString('\n')
-		currentOffset += int64(len(line))
-		if len(strings.TrimSpace(line)) > 0 {
-			var payload any
-			decoder := json.NewDecoder(strings.NewReader(line))
-			decoder.UseNumber()
-			if err := decoder.Decode(&payload); err == nil {
-				if event, ok := c.extractEvent(payload); ok {
-					records = append(records, store.LocalUsageRecord{
-						Source:         c.source,
-						FilePath:       path,
-						ByteOffset:     lineOffset,
-						At:             event.At,
-						Model:          event.Model,
-						Input:          event.Input,
-						Output:         event.Output,
-						CacheRead:      event.CacheRead,
-						CacheCreation:  event.CacheCreation,
-						Reasoning:      event.Reasoning,
-						Total:          event.Total,
-						Quota5hUsed:    quotaUsedOrMissing(event.Quota.FiveHour),
-						Quota5hReset:   event.Quota.FiveHour.ResetAt,
-						QuotaWeekUsed:  quotaUsedOrMissing(event.Quota.Week),
-						QuotaWeekReset: event.Quota.Week.ResetAt,
-					})
-				}
-			}
-		}
-		if err == nil {
-			continue
-		}
-		if err == io.EOF {
-			break
-		}
-		return records, currentOffset, err
-	}
-	return records, currentOffset, nil
-}
-
 func (c *LocalUsageCollector) scanCCUsage(ctx context.Context) ([]localUsageEvent, error) {
 	bin := strings.TrimSpace(c.cfg.CCUsageBin)
 	if bin == "" {
@@ -460,225 +222,7 @@ func (c *LocalUsageCollector) scanCCUsage(ctx context.Context) ([]localUsageEven
 	if err != nil {
 		return nil, fmt.Errorf("run ccusage: %w", err)
 	}
-	return parseCCUsageEvents(output, c.now())
-}
-
-func (c *LocalUsageCollector) extractEvent(payload any) (localUsageEvent, bool) {
-	switch c.source {
-	case localClaudeSource:
-		return extractClaudeLocalEvent(payload)
-	case localCodexSource:
-		return extractCodexLocalEvent(payload)
-	default:
-		return localUsageEvent{}, false
-	}
-}
-
-func extractClaudeLocalEvent(payload any) (localUsageEvent, bool) {
-	record, ok := payload.(map[string]any)
-	if !ok {
-		return localUsageEvent{}, false
-	}
-
-	eventType := strings.TrimSpace(stringify(record["type"]))
-	if eventType != "" && eventType != "assistant" && eventType != "user" {
-		return localUsageEvent{}, false
-	}
-
-	usage, ok := nestedMap(record, "message.usage")
-	if !ok {
-		return localUsageEvent{}, false
-	}
-
-	at, ok := firstTime(record, "timestamp", "created_at")
-	if !ok {
-		return localUsageEvent{}, false
-	}
-
-	return localUsageEvent{
-		At:            at,
-		Model:         firstNestedString(record, "message.model", "model"),
-		Input:         numberAt(usage, "input_tokens"),
-		Output:        numberAt(usage, "output_tokens"),
-		CacheRead:     numberAt(usage, "cache_read_input_tokens"),
-		CacheCreation: numberAt(usage, "cache_creation_input_tokens"),
-		Total:         firstNumber(usage, "total_tokens", "totalTokens", "total"),
-	}, true
-}
-
-func extractCodexLocalEvent(payload any) (localUsageEvent, bool) {
-	record, ok := payload.(map[string]any)
-	if !ok {
-		return localUsageEvent{}, false
-	}
-
-	if event, ok := extractCodexTokenCountEvent(record); ok {
-		return event, true
-	}
-
-	usage, ok := firstNestedMap(record,
-		"payload.usage",
-		"response.usage",
-		"usage",
-		"payload.response.usage",
-	)
-	if !ok {
-		return localUsageEvent{}, false
-	}
-
-	at, ok := firstTime(record, "created_at", "payload.created_at", "response.created_at", "timestamp")
-	if !ok {
-		return localUsageEvent{}, false
-	}
-
-	return localUsageEvent{
-		At:        at,
-		Model:     firstNestedString(record, "payload.model", "response.model", "model", "payload.response.model"),
-		Input:     numberAt(usage, "input_tokens"),
-		Output:    numberAt(usage, "output_tokens"),
-		Reasoning: numberAt(usage, "reasoning_tokens"),
-		Total:     firstNumber(usage, "total_tokens", "totalTokens", "total"),
-	}, true
-}
-
-func extractCodexTokenCountEvent(record map[string]any) (localUsageEvent, bool) {
-	eventType := strings.TrimSpace(stringify(record["type"]))
-	payloadType := strings.TrimSpace(firstNestedString(record, "payload.type"))
-	if eventType != "event_msg" || payloadType != "token_count" {
-		return localUsageEvent{}, false
-	}
-
-	usage, ok := firstNestedMap(record,
-		"payload.info.last_token_usage",
-		"payload.info.total_token_usage",
-	)
-	rateLimits := extractCodexRateLimits(record)
-	if !ok && !rateLimits.hasAny() {
-		return localUsageEvent{}, false
-	}
-
-	at, ok := firstTime(record, "timestamp", "created_at", "payload.created_at")
-	if !ok {
-		return localUsageEvent{}, false
-	}
-
-	event := localUsageEvent{
-		At:    at,
-		Model: firstNestedString(record, "payload.model", "response.model", "model", "payload.response.model"),
-		Quota: rateLimits,
-	}
-	if usage != nil {
-		event.Input = firstNumber(usage, "input_tokens", "inputTokens", "input")
-		event.Output = firstNumber(usage, "output_tokens", "outputTokens", "output")
-		event.Reasoning = firstNumber(usage, "reasoning_tokens", "reasoning_output_tokens", "reasoningOutputTokens", "reasoning")
-		event.Total = firstNumber(usage, "total_tokens", "totalTokens", "total")
-	}
-	return event, event.TotalTokens() > 0 || event.Quota.hasAny()
-}
-
-func extractCodexRateLimits(record map[string]any) localRateLimits {
-	rateLimits, ok := nestedMap(record, "payload.rate_limits")
-	if !ok {
-		return localRateLimits{}
-	}
-	return localRateLimits{
-		FiveHour: extractCodexRateLimit(rateLimits, "primary"),
-		Week:     extractCodexRateLimit(rateLimits, "secondary"),
-	}
-}
-
-func extractCodexRateLimit(rateLimits map[string]any, key string) localQuotaObservation {
-	limit, ok := nestedMap(rateLimits, key)
-	if !ok {
-		return localQuotaObservation{}
-	}
-	used, ok := floatValue(limit["used_percent"])
-	if !ok {
-		return localQuotaObservation{}
-	}
-	observation := localQuotaObservation{
-		OK:          true,
-		UsedPercent: used,
-	}
-	var resetVal any
-	if v, present := limit["resets_at"]; present && v != nil {
-		resetVal = v
-	} else if v, present := limit["reset_at"]; present && v != nil {
-		resetVal = v
-	}
-	if reset, ok := parseEventTime(resetVal); ok {
-		observation.ResetAt = reset.Format(time.RFC3339)
-	}
-	return observation
-}
-
-func parseCCUsageEvents(payload []byte, fallbackTime time.Time) ([]localUsageEvent, error) {
-	var decoded any
-	decoder := json.NewDecoder(strings.NewReader(string(payload)))
-	decoder.UseNumber()
-	if err := decoder.Decode(&decoded); err != nil {
-		return nil, fmt.Errorf("decode ccusage json: %w", err)
-	}
-
-	var events []localUsageEvent
-	visitCCUsageValue(decoded, fallbackTime, &events)
-	if len(events) == 0 {
-		return nil, fmt.Errorf("ccusage payload contains no usage rows")
-	}
-	return events, nil
-}
-
-func visitCCUsageValue(value any, inheritedAt time.Time, events *[]localUsageEvent) {
-	switch typed := value.(type) {
-	case []any:
-		for _, item := range typed {
-			visitCCUsageValue(item, inheritedAt, events)
-		}
-	case map[string]any:
-		at := inheritedAt
-		if parsed, ok := firstTime(typed,
-			"timestamp",
-			"date",
-			"day",
-			"startTime",
-			"start_time",
-			"endTime",
-			"end_time",
-			"from",
-			"since",
-		); ok {
-			at = parsed
-		}
-		if event, ok := extractCCUsageEvent(typed, at); ok {
-			*events = append(*events, event)
-			return
-		}
-		for key, nested := range typed {
-			if key == "usage" || key == "tokenCounts" || key == "tokens" {
-				continue
-			}
-			visitCCUsageValue(nested, at, events)
-		}
-	}
-}
-
-func extractCCUsageEvent(record map[string]any, at time.Time) (localUsageEvent, bool) {
-	usage := record
-	if nested, ok := firstNestedMap(record, "usage", "tokenCounts", "tokens"); ok {
-		usage = nested
-	}
-	event := localUsageEvent{
-		At:            at,
-		Model:         firstNestedString(record, "model", "modelName", "model_name"),
-		Input:         firstNumber(usage, "input_tokens", "inputTokens", "input"),
-		Output:        firstNumber(usage, "output_tokens", "outputTokens", "output"),
-		CacheRead:     firstNumber(usage, "cache_read_input_tokens", "cacheReadInputTokens", "cacheReadTokens", "cache_read"),
-		CacheCreation: firstNumber(usage, "cache_creation_input_tokens", "cacheCreationInputTokens", "cacheCreationTokens", "cache_creation"),
-	}
-	if event.TotalTokens() == 0 {
-		event.Input = firstNumber(usage, "total_tokens", "totalTokens", "total")
-	}
-	return event, event.TotalTokens() > 0
+	return localscan.ParseCCUsageEvents(output, c.now())
 }
 
 func (c *LocalUsageCollector) buildItems(ctx context.Context, events []localUsageEvent) []model.DataItem {
@@ -692,7 +236,7 @@ func (c *LocalUsageCollector) buildItems(ctx context.Context, events []localUsag
 	var latestQuota localRateLimits
 	var latestQuotaAt time.Time
 	for _, event := range events {
-		if event.Quota.hasAny() && (latestQuotaAt.IsZero() || event.At.After(latestQuotaAt)) {
+		if event.Quota.HasAny() && (latestQuotaAt.IsZero() || event.At.After(latestQuotaAt)) {
 			latestQuota = event.Quota
 			latestQuotaAt = event.At
 		}
@@ -790,7 +334,7 @@ func (c *LocalUsageCollector) buildItems(ctx context.Context, events []localUsag
 			continue
 		}
 		if window.Label == "5H" || window.Label == "Week" {
-			items = append(items, c.quotaItem(window, bucket, latestQuota.forWindow(window.Label), quotaSourceForWindow[window.Label], onlineQuotaStatus))
+			items = append(items, c.quotaItem(window, bucket, latestQuota.ForWindow(window.Label), quotaSourceForWindow[window.Label], onlineQuotaStatus))
 		}
 		if window.Key == "today" || window.Key == "month" || window.Key == "weekly" {
 			items = append(items, c.windowUsageItem(window, bucket))
@@ -946,45 +490,11 @@ func (c *LocalUsageCollector) windows(now time.Time) []localWindow {
 	}
 }
 
-func (c *LocalUsageCollector) expandedPaths() []string {
-	return expandedLocalPaths(c.cfg.Paths)
-}
-
-func expandedLocalPaths(rawPaths []string) []string {
-	seen := map[string]struct{}{}
-	paths := make([]string, 0, len(rawPaths))
-	for _, raw := range rawPaths {
-		path := strings.TrimSpace(os.ExpandEnv(raw))
-		if strings.HasPrefix(path, "~/") {
-			if home, err := os.UserHomeDir(); err == nil {
-				path = filepath.Join(home, strings.TrimPrefix(path, "~/"))
-			}
-		}
-		if path == "" {
-			continue
-		}
-		cleaned := filepath.Clean(path)
-		if _, ok := seen[cleaned]; ok {
-			continue
-		}
-		seen[cleaned] = struct{}{}
-		paths = append(paths, cleaned)
-	}
-	return paths
-}
-
 func (c *LocalUsageCollector) displayName() string {
 	if c.source == localCodexSource {
 		return "Codex Local"
 	}
 	return "Claude Local"
-}
-
-func (c *LocalUsageCollector) parserVersion() int {
-	if c.source == localCodexSource {
-		return localCodexParserVersion
-	}
-	return localClaudeParserVersion
 }
 
 func (b *localUsageBucket) add(event localUsageEvent) {
@@ -1006,51 +516,8 @@ func (b localUsageBucket) TotalTokens() float64 {
 	return b.Tokens
 }
 
-func (e localUsageEvent) TotalTokens() float64 {
-	if e.Total > 0 {
-		return e.Total
-	}
-	return e.Input + e.Output + e.CacheRead + e.CacheCreation + e.Reasoning
-}
-
-func (q localRateLimits) hasAny() bool {
-	return q.FiveHour.OK || q.Week.OK
-}
-
-func (q localRateLimits) forWindow(window string) localQuotaObservation {
-	switch window {
-	case "5H":
-		return q.FiveHour
-	case "Week":
-		return q.Week
-	default:
-		return localQuotaObservation{}
-	}
-}
-
 func discardExpiredRateLimits(limits localRateLimits, now time.Time) localRateLimits {
-	if quotaObservationExpired(limits.FiveHour, now) {
-		limits.FiveHour = localQuotaObservation{}
-	}
-	if quotaObservationExpired(limits.Week, now) {
-		limits.Week = localQuotaObservation{}
-	}
-	return limits
-}
-
-func quotaObservationExpired(observation localQuotaObservation, now time.Time) bool {
-	if !observation.OK || strings.TrimSpace(observation.ResetAt) == "" {
-		return false
-	}
-	resetAt, ok := parseEventTime(observation.ResetAt)
-	return ok && !resetAt.After(now)
-}
-
-func quotaUsedOrMissing(observation localQuotaObservation) float64 {
-	if !observation.OK {
-		return -1
-	}
-	return observation.UsedPercent
+	return localscan.DiscardExpired(limits, now)
 }
 
 func normalizeCodexOnlineQuotaStatus(status string) string {
@@ -1067,111 +534,32 @@ func normalizeCodexOnlineQuotaStatus(status string) string {
 	}
 }
 
+func extractCodexRateLimit(rateLimits map[string]any, key string) localQuotaObservation {
+	return localscan.ExtractCodexRateLimit(rateLimits, key)
+}
+
+func parseCCUsageEvents(payload []byte, fallbackTime time.Time) ([]localUsageEvent, error) {
+	return localscan.ParseCCUsageEvents(payload, fallbackTime)
+}
+
 func firstNestedMap(record map[string]any, paths ...string) (map[string]any, bool) {
-	for _, path := range paths {
-		if value, ok := nestedMap(record, path); ok {
-			return value, true
-		}
-	}
-	return nil, false
+	return localscan.FirstNestedMap(record, paths...)
 }
 
 func nestedMap(record map[string]any, path string) (map[string]any, bool) {
-	value, ok := nestedValue(record, path)
-	if !ok {
-		return nil, false
-	}
-	typed, ok := value.(map[string]any)
-	return typed, ok
+	return localscan.NestedMap(record, path)
 }
 
 func firstNestedString(record map[string]any, paths ...string) string {
-	for _, path := range paths {
-		value, ok := nestedValue(record, path)
-		if !ok {
-			continue
-		}
-		if text := strings.TrimSpace(stringify(value)); text != "" {
-			return text
-		}
-	}
-	return ""
+	return localscan.FirstNestedString(record, paths...)
 }
 
 func firstTime(record map[string]any, paths ...string) (time.Time, bool) {
-	for _, path := range paths {
-		value, ok := nestedValue(record, path)
-		if !ok {
-			continue
-		}
-		if parsed, ok := parseEventTime(value); ok {
-			return parsed, true
-		}
-	}
-	return time.Time{}, false
+	return localscan.FirstTime(record, paths...)
 }
 
 func parseEventTime(value any) (time.Time, bool) {
-	switch typed := value.(type) {
-	case json.Number:
-		if parsed, err := typed.Int64(); err == nil {
-			return time.Unix(parsed, 0), true
-		}
-		if parsed, err := typed.Float64(); err == nil {
-			seconds := int64(parsed)
-			nanos := int64((parsed - float64(seconds)) * 1e9)
-			return time.Unix(seconds, nanos), true
-		}
-	case float64:
-		seconds := int64(typed)
-		nanos := int64((typed - float64(seconds)) * 1e9)
-		return time.Unix(seconds, nanos), true
-	case int64:
-		return time.Unix(typed, 0), true
-	case int:
-		return time.Unix(int64(typed), 0), true
-	case string:
-		text := strings.TrimSpace(typed)
-		if text == "" {
-			return time.Time{}, false
-		}
-		if parsed, err := time.Parse(time.RFC3339Nano, text); err == nil {
-			return parsed, true
-		}
-		if parsed, err := time.ParseInLocation("2006-01-02", text, time.Local); err == nil {
-			return parsed, true
-		}
-		if parsed, err := strconv.ParseInt(text, 10, 64); err == nil {
-			return time.Unix(parsed, 0), true
-		}
-		if parsed, err := strconv.ParseFloat(text, 64); err == nil {
-			seconds := int64(parsed)
-			nanos := int64((parsed - float64(seconds)) * 1e9)
-			return time.Unix(seconds, nanos), true
-		}
-	}
-	return time.Time{}, false
-}
-
-func numberAt(record map[string]any, key string) float64 {
-	value, ok := record[key]
-	if !ok {
-		return 0
-	}
-	number, ok := floatValue(value)
-	if !ok {
-		return 0
-	}
-	return number
-}
-
-func firstNumber(record map[string]any, keys ...string) float64 {
-	for _, key := range keys {
-		if number := numberAt(record, key); number != 0 {
-			return number
-		}
-	}
-	return 0
+	return localscan.ParseEventTime(value)
 }
 
 func topModel(models map[string]float64) (string, float64, bool) {

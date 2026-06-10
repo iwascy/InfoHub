@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"infohub/internal/config"
+	"infohub/internal/localscan"
 	"infohub/internal/model"
 )
 
@@ -466,30 +467,7 @@ func searchValue(payload any, expected map[string]struct{}) (any, bool) {
 }
 
 func nestedValue(payload any, path string) (any, bool) {
-	if strings.TrimSpace(path) == "" {
-		return nil, false
-	}
-
-	current := payload
-	for _, part := range strings.Split(path, ".") {
-		key := strings.TrimSpace(part)
-		if key == "" {
-			return nil, false
-		}
-
-		record, ok := current.(map[string]any)
-		if !ok {
-			return nil, false
-		}
-
-		next, ok := record[key]
-		if !ok {
-			return nil, false
-		}
-		current = next
-	}
-
-	return current, true
+	return localscan.NestedValue(payload, path)
 }
 
 func normalizeKey(key string) string {
@@ -498,41 +476,7 @@ func normalizeKey(key string) string {
 }
 
 func stringify(value any) string {
-	switch typed := value.(type) {
-	case nil:
-		return ""
-	case string:
-		return typed
-	case json.Number:
-		return typed.String()
-	case float64:
-		if typed == float64(int64(typed)) {
-			return strconv.FormatInt(int64(typed), 10)
-		}
-		return strconv.FormatFloat(typed, 'f', 2, 64)
-	case float32:
-		if typed == float32(int64(typed)) {
-			return strconv.FormatInt(int64(typed), 10)
-		}
-		return strconv.FormatFloat(float64(typed), 'f', 2, 32)
-	case int:
-		return strconv.Itoa(typed)
-	case int64:
-		return strconv.FormatInt(typed, 10)
-	case int32:
-		return strconv.FormatInt(int64(typed), 10)
-	case bool:
-		if typed {
-			return "true"
-		}
-		return "false"
-	default:
-		raw, err := json.Marshal(typed)
-		if err != nil {
-			return fmt.Sprintf("%v", typed)
-		}
-		return string(raw)
-	}
+	return localscan.Stringify(value)
 }
 
 func firstString(record map[string]any, keys ...string) string {
@@ -574,26 +518,7 @@ func firstInt64(record map[string]any, keys ...string) int64 {
 }
 
 func floatValue(value any) (float64, bool) {
-	switch typed := value.(type) {
-	case json.Number:
-		parsed, err := typed.Float64()
-		return parsed, err == nil
-	case float64:
-		return typed, true
-	case float32:
-		return float64(typed), true
-	case int:
-		return float64(typed), true
-	case int64:
-		return float64(typed), true
-	case int32:
-		return float64(typed), true
-	case string:
-		parsed, err := strconv.ParseFloat(strings.TrimSpace(typed), 64)
-		return parsed, err == nil
-	default:
-		return 0, false
-	}
+	return localscan.FloatValue(value)
 }
 
 func boolValue(value any) (bool, bool) {

@@ -383,7 +383,7 @@ func parseCodexOnlineRateLimits(payload any) (localRateLimits, bool) {
 		FiveHour: extractCodexRateLimit(rateLimits, primaryKey),
 		Week:     extractCodexRateLimit(rateLimits, secondaryKey),
 	}
-	return limits, limits.hasAny()
+	return limits, limits.HasAny()
 }
 
 func findCodexOnlineRateLimitsMap(value any, depth int) (map[string]any, bool) {
@@ -465,7 +465,7 @@ func (c *CodexOnlineQuotaClient) rememberSuccessPath(path string) {
 func (c *CodexOnlineQuotaClient) cachedResult(now time.Time) (localRateLimits, bool) {
 	c.lastResultM.RLock()
 	defer c.lastResultM.RUnlock()
-	if c.lastResult.at.IsZero() || !c.lastResult.limits.hasAny() {
+	if c.lastResult.at.IsZero() || !c.lastResult.limits.HasAny() {
 		return localRateLimits{}, false
 	}
 	return c.lastResult.limits, now.Before(c.lastResult.at.Add(c.staleAfter))

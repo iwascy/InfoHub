@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  infohub-agent LaunchAgent（按用户加载，勿装成 LaunchDaemon —— 读取
+  Keychain 中的 Claude Code 凭据需要用户会话）。
+
+  安装：
+    cp bin/infohub-agent /usr/local/bin/
+    mkdir -p ~/.config/infohub-agent && cp deploy/agent/config.example.yaml ~/.config/infohub-agent/config.yaml
+    # 先交互式跑一次，完成 Keychain 授权：
+    /usr/local/bin/infohub-agent -once
+    cp deploy/agent/com.infohub.agent.plist ~/Library/LaunchAgents/
+    launchctl load ~/Library/LaunchAgents/com.infohub.agent.plist
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.infohub.agent</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/local/bin/infohub-agent</string>
+        <string>-once</string>
+    </array>
+    <key>StartInterval</key>
+    <integer>300</integer>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/tmp/infohub-agent.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/infohub-agent.log</string>
+</dict>
+</plist>

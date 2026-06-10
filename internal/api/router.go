@@ -9,7 +9,7 @@ import (
 	"infohub/internal/store"
 )
 
-func NewRouter(dataStore store.Store, registry *collector.Registry, scheduler *scheduler.Scheduler, logger *slog.Logger, authToken string, dashboardToken string, dashboardMockEnabled bool, dashboardSources DashboardSources) http.Handler {
+func NewRouter(dataStore store.Store, registry *collector.Registry, scheduler *scheduler.Scheduler, logger *slog.Logger, authToken string, dashboardToken string, ingestToken string, dashboardMockEnabled bool, dashboardSources DashboardSources) http.Handler {
 	handler := NewHandlerWithOptions(dataStore, registry, scheduler, HandlerOptions{
 		DashboardMockEnabled: dashboardMockEnabled,
 		DashboardSources:     dashboardSources,
@@ -20,6 +20,7 @@ func NewRouter(dataStore store.Store, registry *collector.Registry, scheduler *s
 	mux.HandleFunc("GET /api/v1/source/{name}", handler.Source)
 	mux.HandleFunc("GET /api/v1/health", handler.Health)
 	mux.HandleFunc("POST /api/v1/collect/{name}", handler.Collect)
+	mux.Handle("POST /api/v1/ingest/local-usage", withIngestAuth(http.HandlerFunc(handler.IngestLocalUsage), ingestToken))
 	mux.Handle("GET /dashboard/eink", withDashboardAccess(http.HandlerFunc(handler.EInkDashboard), authToken, dashboardToken))
 	mux.Handle("GET /dashboard/eink.json", withDashboardAccess(http.HandlerFunc(handler.EInkDashboardData), authToken, dashboardToken))
 	mux.Handle("GET /dashboard/eink/device.json", withDashboardAccess(http.HandlerFunc(handler.EInkDeviceData), authToken, dashboardToken))

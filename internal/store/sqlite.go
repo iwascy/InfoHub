@@ -23,7 +23,11 @@ func NewSQLiteStore(path string) (*SQLiteStore, error) {
 		return nil, fmt.Errorf("create sqlite dir: %w", err)
 	}
 
-	db, err := sql.Open("sqlite", path)
+	// busy_timeout lets concurrent readers/writers (parallel collectors,
+	// agent ingest) wait instead of failing with SQLITE_BUSY; WAL allows
+	// reads during writes.
+	dsn := "file:" + path + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)"
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite db: %w", err)
 	}
@@ -151,6 +155,7 @@ CREATE TABLE IF NOT EXISTS local_parse_state (
 );
 
 CREATE TABLE IF NOT EXISTS local_usage_events (
+	machine TEXT NOT NULL DEFAULT '',
 	source TEXT NOT NULL,
 	file_path TEXT NOT NULL,
 	byte_offset INTEGER NOT NULL,
@@ -166,11 +171,23 @@ CREATE TABLE IF NOT EXISTS local_usage_events (
 	quota_5h_reset_at TEXT NOT NULL DEFAULT '',
 	quota_week_used_percent REAL NOT NULL DEFAULT -1,
 	quota_week_reset_at TEXT NOT NULL DEFAULT '',
-	PRIMARY KEY (source, file_path, byte_offset)
+	PRIMARY KEY (machine, source, file_path, byte_offset)
 );
 
 CREATE INDEX IF NOT EXISTS idx_local_usage_events_source_at
 	ON local_usage_events(source, at_unix);
+
+CREATE TABLE IF NOT EXISTS agent_quota_observations (
+	machine TEXT NOT NULL,
+	source TEXT NOT NULL,
+	quota_5h_used_percent REAL NOT NULL DEFAULT -1,
+	quota_5h_reset_at TEXT NOT NULL DEFAULT '',
+	quota_week_used_percent REAL NOT NULL DEFAULT -1,
+	quota_week_reset_at TEXT NOT NULL DEFAULT '',
+	observed_at INTEGER NOT NULL,
+	agent_version TEXT NOT NULL DEFAULT '',
+	PRIMARY KEY (machine, source)
+);
 `
 	if _, err := s.db.Exec(schema); err != nil {
 		return fmt.Errorf("init sqlite schema: %w", err)
@@ -180,6 +197,66 @@ CREATE INDEX IF NOT EXISTS idx_local_usage_events_source_at
 	}
 	if err := s.ensureLocalUsageColumns(); err != nil {
 		return err
+	}
+	if err := s.ensureLocalUsageMachineColumn(); err != nil {
+		return err
+	}
+	return nil
+}
+
+// ensureLocalUsageMachineColumn rebuilds local_usage_events for databases
+// created before the machine dimension existed: SQLite cannot alter a
+// primary key in place, so rows are copied into a new table with machine=”.
+// Must run after ensureLocalUsageColumns so the quota/total columns exist.
+func (s *SQLiteStore) ensureLocalUsageMachineColumn() error {
+	columns, err := s.localUsageColumns()
+	if err != nil {
+		return err
+	}
+	if columns["machine"] {
+		return nil
+	}
+
+	const migration = `
+BEGIN;
+CREATE TABLE local_usage_events_new (
+	machine TEXT NOT NULL DEFAULT '',
+	source TEXT NOT NULL,
+	file_path TEXT NOT NULL,
+	byte_offset INTEGER NOT NULL,
+	at_unix INTEGER NOT NULL,
+	model TEXT NOT NULL,
+	input REAL NOT NULL,
+	output REAL NOT NULL,
+	cache_read REAL NOT NULL,
+	cache_creation REAL NOT NULL,
+	reasoning REAL NOT NULL,
+	total REAL NOT NULL DEFAULT 0,
+	quota_5h_used_percent REAL NOT NULL DEFAULT -1,
+	quota_5h_reset_at TEXT NOT NULL DEFAULT '',
+	quota_week_used_percent REAL NOT NULL DEFAULT -1,
+	quota_week_reset_at TEXT NOT NULL DEFAULT '',
+	PRIMARY KEY (machine, source, file_path, byte_offset)
+);
+INSERT INTO local_usage_events_new (
+	machine, source, file_path, byte_offset, at_unix, model,
+	input, output, cache_read, cache_creation, reasoning, total,
+	quota_5h_used_percent, quota_5h_reset_at,
+	quota_week_used_percent, quota_week_reset_at
+)
+SELECT '', source, file_path, byte_offset, at_unix, model,
+	input, output, cache_read, cache_creation, reasoning, total,
+	quota_5h_used_percent, quota_5h_reset_at,
+	quota_week_used_percent, quota_week_reset_at
+FROM local_usage_events;
+DROP TABLE local_usage_events;
+ALTER TABLE local_usage_events_new RENAME TO local_usage_events;
+CREATE INDEX IF NOT EXISTS idx_local_usage_events_source_at
+	ON local_usage_events(source, at_unix);
+COMMIT;
+`
+	if _, err := s.db.Exec(migration); err != nil {
+		return fmt.Errorf("migrate local_usage_events machine column: %w", err)
 	}
 	return nil
 }
@@ -380,7 +457,7 @@ func (s *SQLiteStore) SaveLocalUsageBatch(source string, states []LocalParseStat
 			state.Source = source
 		}
 		if state.Reset {
-			if _, err := tx.Exec(`DELETE FROM local_usage_events WHERE source = ? AND file_path = ?`, state.Source, state.FilePath); err != nil {
+			if _, err := tx.Exec(`DELETE FROM local_usage_events WHERE machine = '' AND source = ? AND file_path = ?`, state.Source, state.FilePath); err != nil {
 				return fmt.Errorf("delete reset local usage events: %w", err)
 			}
 		}
@@ -401,32 +478,8 @@ func (s *SQLiteStore) SaveLocalUsageBatch(source string, states []LocalParseStat
 		if record.Source == "" {
 			record.Source = source
 		}
-		if _, err := tx.Exec(`
-			INSERT INTO local_usage_events(
-				source, file_path, byte_offset, at_unix, model,
-				input, output, cache_read, cache_creation, reasoning,
-				total,
-				quota_5h_used_percent, quota_5h_reset_at,
-				quota_week_used_percent, quota_week_reset_at
-			)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-			ON CONFLICT(source, file_path, byte_offset) DO UPDATE SET
-				at_unix=excluded.at_unix,
-				model=excluded.model,
-				input=excluded.input,
-				output=excluded.output,
-				cache_read=excluded.cache_read,
-				cache_creation=excluded.cache_creation,
-				reasoning=excluded.reasoning,
-				total=excluded.total,
-				quota_5h_used_percent=excluded.quota_5h_used_percent,
-				quota_5h_reset_at=excluded.quota_5h_reset_at,
-				quota_week_used_percent=excluded.quota_week_used_percent,
-				quota_week_reset_at=excluded.quota_week_reset_at
-		`, record.Source, record.FilePath, record.ByteOffset, record.At.Unix(), record.Model,
-			record.Input, record.Output, record.CacheRead, record.CacheCreation, record.Reasoning,
-			record.Total, record.Quota5hUsed, record.Quota5hReset, record.QuotaWeekUsed, record.QuotaWeekReset); err != nil {
-			return fmt.Errorf("upsert local usage event: %w", err)
+		if err := upsertLocalUsageRecord(tx, record); err != nil {
+			return err
 		}
 	}
 
@@ -436,16 +489,138 @@ func (s *SQLiteStore) SaveLocalUsageBatch(source string, states []LocalParseStat
 	return nil
 }
 
+func upsertLocalUsageRecord(tx *sql.Tx, record LocalUsageRecord) error {
+	if _, err := tx.Exec(`
+		INSERT INTO local_usage_events(
+			machine, source, file_path, byte_offset, at_unix, model,
+			input, output, cache_read, cache_creation, reasoning,
+			total,
+			quota_5h_used_percent, quota_5h_reset_at,
+			quota_week_used_percent, quota_week_reset_at
+		)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(machine, source, file_path, byte_offset) DO UPDATE SET
+			at_unix=excluded.at_unix,
+			model=excluded.model,
+			input=excluded.input,
+			output=excluded.output,
+			cache_read=excluded.cache_read,
+			cache_creation=excluded.cache_creation,
+			reasoning=excluded.reasoning,
+			total=excluded.total,
+			quota_5h_used_percent=excluded.quota_5h_used_percent,
+			quota_5h_reset_at=excluded.quota_5h_reset_at,
+			quota_week_used_percent=excluded.quota_week_used_percent,
+			quota_week_reset_at=excluded.quota_week_reset_at
+	`, record.Machine, record.Source, record.FilePath, record.ByteOffset, record.At.Unix(), record.Model,
+		record.Input, record.Output, record.CacheRead, record.CacheCreation, record.Reasoning,
+		record.Total, record.Quota5hUsed, record.Quota5hReset, record.QuotaWeekUsed, record.QuotaWeekReset); err != nil {
+		return fmt.Errorf("upsert local usage event: %w", err)
+	}
+	return nil
+}
+
+func (s *SQLiteStore) SaveIngestedUsage(machine, source string, resetFiles []string, records []LocalUsageRecord) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin ingest tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	for _, filePath := range resetFiles {
+		if _, err := tx.Exec(`DELETE FROM local_usage_events WHERE machine = ? AND source = ? AND file_path = ?`, machine, source, filePath); err != nil {
+			return fmt.Errorf("delete reset ingested events: %w", err)
+		}
+	}
+
+	for _, record := range records {
+		record.Machine = machine
+		record.Source = source
+		if err := upsertLocalUsageRecord(tx, record); err != nil {
+			return err
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit ingest tx: %w", err)
+	}
+	return nil
+}
+
+func (s *SQLiteStore) SaveAgentQuotaObservation(obs AgentQuotaObservation) error {
+	observedAt := obs.ObservedAt
+	if observedAt.IsZero() {
+		observedAt = time.Now()
+	}
+	if _, err := s.db.Exec(`
+		INSERT INTO agent_quota_observations(
+			machine, source,
+			quota_5h_used_percent, quota_5h_reset_at,
+			quota_week_used_percent, quota_week_reset_at,
+			observed_at, agent_version
+		)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(machine, source) DO UPDATE SET
+			quota_5h_used_percent=excluded.quota_5h_used_percent,
+			quota_5h_reset_at=excluded.quota_5h_reset_at,
+			quota_week_used_percent=excluded.quota_week_used_percent,
+			quota_week_reset_at=excluded.quota_week_reset_at,
+			observed_at=excluded.observed_at,
+			agent_version=excluded.agent_version
+	`, obs.Machine, obs.Source,
+		obs.Quota5hUsed, obs.Quota5hReset,
+		obs.QuotaWeekUsed, obs.QuotaWeekReset,
+		observedAt.Unix(), obs.AgentVersion); err != nil {
+		return fmt.Errorf("upsert agent quota observation: %w", err)
+	}
+	return nil
+}
+
+func (s *SQLiteStore) LatestAgentQuotaObservation(source string) (AgentQuotaObservation, bool, error) {
+	row := s.db.QueryRow(`
+		SELECT machine, source,
+			quota_5h_used_percent, quota_5h_reset_at,
+			quota_week_used_percent, quota_week_reset_at,
+			observed_at, agent_version
+		FROM agent_quota_observations
+		WHERE source = ?
+		ORDER BY observed_at DESC
+		LIMIT 1
+	`, source)
+
+	var (
+		obs        AgentQuotaObservation
+		observedAt int64
+	)
+	if err := row.Scan(
+		&obs.Machine,
+		&obs.Source,
+		&obs.Quota5hUsed,
+		&obs.Quota5hReset,
+		&obs.QuotaWeekUsed,
+		&obs.QuotaWeekReset,
+		&observedAt,
+		&obs.AgentVersion,
+	); err != nil {
+		if err == sql.ErrNoRows {
+			return AgentQuotaObservation{}, false, nil
+		}
+		return AgentQuotaObservation{}, false, fmt.Errorf("query agent quota observation: %w", err)
+	}
+	obs.ObservedAt = time.Unix(observedAt, 0)
+	return obs, true, nil
+}
+
 func (s *SQLiteStore) ListLocalUsageRecords(source string, start time.Time, end time.Time) ([]LocalUsageRecord, error) {
 	rows, err := s.db.Query(`
-		SELECT source, file_path, byte_offset, at_unix, model,
+		SELECT machine, source, file_path, byte_offset, at_unix, model,
 			input, output, cache_read, cache_creation, reasoning,
 			total,
 			quota_5h_used_percent, quota_5h_reset_at,
 			quota_week_used_percent, quota_week_reset_at
 		FROM local_usage_events
 		WHERE source = ? AND at_unix >= ? AND at_unix < ?
-		ORDER BY at_unix ASC, file_path ASC, byte_offset ASC
+		ORDER BY at_unix ASC, machine ASC, file_path ASC, byte_offset ASC
 	`, source, start.Unix(), end.Unix())
 	if err != nil {
 		return nil, fmt.Errorf("query local usage records: %w", err)
@@ -459,6 +634,7 @@ func (s *SQLiteStore) ListLocalUsageRecords(source string, start time.Time, end 
 			atUnix int64
 		)
 		if err := rows.Scan(
+			&record.Machine,
 			&record.Source,
 			&record.FilePath,
 			&record.ByteOffset,

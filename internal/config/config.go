@@ -23,6 +23,7 @@ const (
 	defaultCollectorTimeout       = 15
 	defaultCodexOnlineTimeout     = 8
 	defaultCodexOnlineStaleAfter  = 60
+	defaultRemoteQuotaStale       = 1800
 )
 
 type Config struct {
@@ -37,10 +38,20 @@ type ServerConfig struct {
 	Port                   int    `yaml:"port"`
 	AuthToken              string `yaml:"auth_token"`
 	DashboardToken         string `yaml:"dashboard_token"`
+	IngestToken            string `yaml:"ingest_token"`
 	MockEnabled            bool   `yaml:"mock_enabled"`
 	ReadTimeoutSeconds     int    `yaml:"read_timeout_seconds"`
 	WriteTimeoutSeconds    int    `yaml:"write_timeout_seconds"`
 	ShutdownTimeoutSeconds int    `yaml:"shutdown_timeout_seconds"`
+}
+
+// EffectiveIngestToken returns the token agents must present on the ingest
+// endpoint, falling back to the API auth token when no dedicated one is set.
+func (s ServerConfig) EffectiveIngestToken() string {
+	if token := strings.TrimSpace(s.IngestToken); token != "" {
+		return token
+	}
+	return strings.TrimSpace(s.AuthToken)
 }
 
 type DashboardConfig struct {
@@ -118,11 +129,22 @@ type LocalCollectorConfig struct {
 	Cron           string                 `yaml:"cron"`
 	TimeoutSeconds int                    `yaml:"timeout_seconds"`
 	Paths          []string               `yaml:"paths"`
-	Mode           string                 `yaml:"mode"`
+	Mode           string                 `yaml:"mode"` // builtin | ccusage | remote
 	CCUsageBin     string                 `yaml:"ccusage_bin"`
 	CCUsageArgs    []string               `yaml:"ccusage_args"`
 	Quota          LocalQuotaConfig       `yaml:"quota"`
 	Online         LocalCodexOnlineConfig `yaml:"online"`
+	// RemoteQuotaStaleSeconds bounds how old an agent-reported quota
+	// observation may be before remote mode stops trusting it.
+	RemoteQuotaStaleSeconds int `yaml:"remote_quota_stale_seconds"`
+}
+
+func (c LocalCollectorConfig) IsRemote() bool {
+	return strings.EqualFold(strings.TrimSpace(c.Mode), "remote")
+}
+
+func (c LocalCollectorConfig) RemoteQuotaStale() time.Duration {
+	return time.Duration(c.RemoteQuotaStaleSeconds) * time.Second
 }
 
 type LocalQuotaConfig struct {
@@ -290,6 +312,17 @@ func (c Config) validate() error {
 		return fmt.Errorf("invalid server port %d", c.Server.Port)
 	}
 
+	// Remote mode aggregates agent-pushed records, which only the sqlite
+	// store can persist.
+	if !strings.EqualFold(c.Store.Type, "sqlite") {
+		if c.Collectors.ClaudeLocal.Enabled && c.Collectors.ClaudeLocal.IsRemote() {
+			return fmt.Errorf("claude_local mode \"remote\" requires store.type \"sqlite\"")
+		}
+		if c.Collectors.CodexLocal.Enabled && c.Collectors.CodexLocal.IsRemote() {
+			return fmt.Errorf("codex_local mode \"remote\" requires store.type \"sqlite\"")
+		}
+	}
+
 	return nil
 }
 
@@ -378,6 +411,9 @@ func (c *LocalCollectorConfig) applyDefaults(source string) {
 	if c.Mode == "" {
 		c.Mode = "builtin"
 	}
+	if c.RemoteQuotaStaleSeconds == 0 {
+		c.RemoteQuotaStaleSeconds = defaultRemoteQuotaStale
+	}
 	if source == "claude_local" {
 		if len(c.Paths) == 0 {
 			c.Paths = []string{
@@ -446,6 +482,13 @@ func cloneStringMap(source map[string]string) map[string]string {
 		cloned[key] = value
 	}
 	return cloned
+}
+
+// LoadDotEnv loads a .env file located next to the given config file into
+// the process environment (existing variables win). Exposed for the
+// infohub-agent binary, which shares the same config conventions.
+func LoadDotEnv(configPath string) error {
+	return loadDotEnv(configPath)
 }
 
 func loadDotEnv(configPath string) error {
