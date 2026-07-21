@@ -7,16 +7,44 @@
 substitutions:
   device_name: reterminal-e1001-infohub
   friendly_name: reTerminal E1001 InfoHub
-  poll_interval: 5min
+  plugged_poll_interval: 2min
+  battery_wake_interval_minutes: "30"
+  low_battery_wake_interval_minutes: "120"
+  battery_awake_timeout: 60s
+  battery_sensor_update_interval: 2min
+  power_profile_update_interval: 5min
   full_payload_sync_every: "6"
+  time_zone: Asia/Shanghai
+  battery_quiet_start_hour: "22"
+  battery_quiet_end_hour: "10"
+  plugged_voltage_threshold: "4.15"
+  battery_voltage_threshold: "4.05"
+  low_battery_level_threshold: "20"
 
 esphome:
   name: ${device_name}
   friendly_name: ${friendly_name}
   on_boot:
-    priority: -100
-    then:
-      - script.execute: fetch_dashboard_payload
+    - priority: 600
+      then:
+        - output.turn_on: bsp_battery_enable
+        - lambda: |-
+            esp_sleep_wakeup_cause_t wakeup_cause = esp_sleep_get_wakeup_cause();
+            if (wakeup_cause == ESP_SLEEP_WAKEUP_EXT0 ||
+                wakeup_cause == ESP_SLEEP_WAKEUP_EXT1 ||
+                wakeup_cause == ESP_SLEEP_WAKEUP_GPIO) {
+              id(manual_wake_refresh_requested) = true;
+              id(force_full_refresh_requested) = true;
+              ESP_LOGI("power_profile", "manual wake detected, forcing one refresh");
+            } else if (wakeup_cause != ESP_SLEEP_WAKEUP_TIMER) {
+              // A cold boot, OTA reboot, or reset may be running a new layout.
+              id(force_full_refresh_requested) = true;
+            }
+        - delay: 200ms
+        - component.update: battery_voltage
+        - component.update: battery_level
+        - output.turn_off: bsp_battery_enable
+        - script.execute: battery_awake_watchdog
 
 esp32:
   board: esp32-s3-devkitc-1
@@ -28,6 +56,7 @@ psram:
   speed: 80MHz
 
 logger:
+  level: INFO
 
 api:
   encryption:
@@ -40,63 +69,106 @@ ota:
 wifi:
   ssid: !secret wifi_ssid
   password: !secret wifi_password
+  fast_connect: true
+  power_save_mode: HIGH
+  # 静态 IP 可以明显缩短唤醒后联网时间。填好 secrets 后取消注释。
+  # manual_ip:
+  #   static_ip: !secret wifi_static_ip
+  #   gateway: !secret wifi_gateway
+  #   subnet: !secret wifi_subnet
+  on_connect:
+    then:
+      - script.execute: run_power_aware_refresh
   ap:
     ssid: "InfoHub Fallback"
     password: !secret wifi_fallback_password
+    ap_timeout: 0s
 
 captive_portal:
 
 json:
 
+output:
+  - platform: gpio
+    pin: GPIO21
+    id: bsp_battery_enable
+
 http_request:
   verify_ssl: false
-  timeout: 20s
-  watchdog_timeout: 25s
+  timeout: 10s
+  watchdog_timeout: 12s
   useragent: ${device_name}
 
 font:
   - file: "gfonts://Noto+Sans+SC@700"
     id: font_huge
     size: 54
-    glyphs: ' 0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz%$.,:-_+/()[]#&!?@*=<>"''：刷新时间状态等待首次拉取数据解析失败请求成本启用告警总量今日合计余仅正常关注充足最佳耗尽重置暂无同步与系统概览配额显示按键周期点急'
+    glyphsets: &infohub_font_glyphsets
+      - GF_Latin_Kernel
+    glyphs: &infohub_font_glyphs '：刷新时间状态等待首次拉取数据解析失败请求成本启用告警总量今日合计余仅正常关注充足最佳耗尽重置暂无同步与系统概览配额显示按键周期点急低电'
   - file: "gfonts://Noto+Sans+SC@700"
     id: font_header
     size: 24
-    glyphs: ' 0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz%$.,:-_+/()[]#&!?@*=<>"''：刷新时间状态等待首次拉取数据解析失败请求成本启用告警总量今日合计余仅正常关注充足最佳耗尽重置暂无同步与系统概览配额显示按键周期点急'
-  - file: "gfonts://Noto+Sans+SC@500"
+    glyphsets: *infohub_font_glyphsets
+    glyphs: *infohub_font_glyphs
+  - file: "gfonts://Noto+Sans+SC@700"
     id: font_time
     size: 16
-    glyphs: ' 0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz%$.,:-_+/()[]#&!?@*=<>"''：刷新时间状态等待首次拉取数据解析失败请求成本启用告警总量今日合计余仅正常关注充足最佳耗尽重置暂无同步与系统概览配额显示按键周期点急'
-  - file: "gfonts://Noto+Sans+SC@500"
+    glyphsets: *infohub_font_glyphsets
+    glyphs: *infohub_font_glyphs
+  - file: "gfonts://Noto+Sans+SC@700"
     id: font_label
     size: 17
-    glyphs: ' 0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz%$.,:-_+/()[]#&!?@*=<>"''：刷新时间状态等待首次拉取数据解析失败请求成本启用告警总量今日合计余仅正常关注充足最佳耗尽重置暂无同步与系统概览配额显示按键周期点急'
+    glyphsets: *infohub_font_glyphsets
+    glyphs: *infohub_font_glyphs
   - file: "gfonts://Noto+Sans+SC@700"
     id: font_title
     size: 17
-    glyphs: ' 0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz%$.,:-_+/()[]#&!?@*=<>"''：刷新时间状态等待首次拉取数据解析失败请求成本启用告警总量今日合计余仅正常关注充足最佳耗尽重置暂无同步与系统概览配额显示按键周期点急'
+    glyphsets: *infohub_font_glyphsets
+    glyphs: *infohub_font_glyphs
   - file: "gfonts://Noto+Sans+SC@700"
     id: font_metric
     size: 18
-    glyphs: ' 0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz%$.,:-_+/()[]#&!?@*=<>"''：刷新时间状态等待首次拉取数据解析失败请求成本启用告警总量今日合计余仅正常关注充足最佳耗尽重置暂无同步与系统概览配额显示按键周期点急'
+    glyphsets: *infohub_font_glyphsets
+    glyphs: *infohub_font_glyphs
   - file: "gfonts://Noto+Sans+SC@600"
     id: font_md
     size: 15
-    glyphs: ' 0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz%$.,:-_+/()[]#&!?@*=<>"''：刷新时间状态等待首次拉取数据解析失败请求成本启用告警总量今日合计余仅正常关注充足最佳耗尽重置暂无同步与系统概览配额显示按键周期点急'
-  - file: "gfonts://Noto+Sans+SC@500"
+    glyphsets: *infohub_font_glyphsets
+    glyphs: *infohub_font_glyphs
+  - file: "gfonts://Noto+Sans+SC@700"
     id: font_sm
     size: 14
-    glyphs: ' 0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz%$.,:-_+/()[]#&!?@*=<>"''：刷新时间状态等待首次拉取数据解析失败请求成本启用告警总量今日合计余仅正常关注充足最佳耗尽重置暂无同步与系统概览配额显示按键周期点急'
-  - file: "gfonts://Noto+Sans+SC@500"
+    glyphsets: *infohub_font_glyphsets
+    glyphs: *infohub_font_glyphs
+  - file: "gfonts://Noto+Sans+SC@700"
     id: font_xs
     size: 13
-    glyphs: ' 0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz%$.,:-_+/()[]#&!?@*=<>"''：刷新时间状态等待首次拉取数据解析失败请求成本启用告警总量今日合计余仅正常关注充足最佳耗尽重置暂无同步与系统概览配额显示按键周期点急'
+    glyphsets: *infohub_font_glyphsets
+    glyphs: *infohub_font_glyphs
   - file: "gfonts://Noto+Sans+SC@700"
     id: font_badge
     size: 13
-    glyphs: ' 0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz%$.,:-_+/()[]#&!?@*=<>"''：刷新时间状态等待首次拉取数据解析失败请求成本启用告警总量今日合计余仅正常关注充足最佳耗尽重置暂无同步与系统概览配额显示按键周期点急'
+    glyphsets: *infohub_font_glyphsets
+    glyphs: *infohub_font_glyphs
 
 globals:
+  - id: battery_sample_ready
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: low_battery_active
+    type: bool
+    restore_value: yes
+    initial_value: 'false'
+  - id: low_battery_display_refresh_pending
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: external_power_connected
+    type: bool
+    restore_value: no
+    initial_value: 'false'
   - id: last_payload_body
     type: std::string
     restore_value: no
@@ -117,10 +189,22 @@ globals:
     type: bool
     restore_value: no
     initial_value: 'false'
+  - id: manual_wake_refresh_requested
+    type: bool
+    restore_value: no
+    initial_value: 'false'
   - id: partial_refresh_counter
     type: int
-    restore_value: no
+    restore_value: yes
     initial_value: '0'
+  - id: payload_fingerprint
+    type: uint32_t
+    restore_value: yes
+    initial_value: '0'
+  - id: payload_fingerprint_ready
+    type: bool
+    restore_value: yes
+    initial_value: 'false'
   - id: claude_value_live
     type: std::string
     restore_value: no
@@ -137,19 +221,19 @@ globals:
     type: int
     restore_value: no
     initial_value: '0'
-  - id: sub2api_value_live
+  - id: codex_value_live
     type: std::string
     restore_value: no
     initial_value: '"--"'
-  - id: sub2api_cost_live
+  - id: codex_cost_live
     type: std::string
     restore_value: no
     initial_value: '"--"'
-  - id: sub2api_requests_live
+  - id: codex_requests_live
     type: int
     restore_value: no
     initial_value: '0'
-  - id: sub2api_enabled_live
+  - id: codex_enabled_live
     type: int
     restore_value: no
     initial_value: '0'
@@ -170,13 +254,263 @@ globals:
     restore_value: no
     initial_value: '0'
 
+sensor:
+  - platform: adc
+    pin: GPIO1
+    name: "${friendly_name} Battery Voltage"
+    id: battery_voltage
+    update_interval: never
+    attenuation: 12db
+    accuracy_decimals: 2
+    filters:
+      - multiply: 2.0
+    on_value:
+      then:
+        - lambda: |-
+            const float plugged_threshold = ${plugged_voltage_threshold};
+            const float battery_threshold = ${battery_voltage_threshold};
+            bool had_sample = id(battery_sample_ready);
+            bool previous_mode = id(external_power_connected);
+            bool next_mode = previous_mode;
+
+            if (!had_sample) {
+              next_mode = x >= plugged_threshold;
+              id(battery_sample_ready) = true;
+            } else if (x >= plugged_threshold) {
+              next_mode = true;
+            } else if (x <= battery_threshold) {
+              next_mode = false;
+            }
+
+            id(external_power_connected) = next_mode;
+
+            if (had_sample && next_mode != previous_mode) {
+              ESP_LOGI(
+                "power_profile",
+                "power profile changed to %s at %.2fV",
+                next_mode ? "plugged" : "battery",
+                x
+              );
+              id(run_power_aware_refresh).execute();
+            }
+
+  - platform: template
+    name: "${friendly_name} Battery Level"
+    id: battery_level
+    unit_of_measurement: "%"
+    icon: "mdi:battery"
+    device_class: battery
+    state_class: measurement
+    accuracy_decimals: 0
+    lambda: |-
+      return id(battery_voltage).state;
+    update_interval: never
+    filters:
+      - calibrate_linear:
+          - 4.15 -> 100.0
+          - 3.96 -> 90.0
+          - 3.91 -> 80.0
+          - 3.85 -> 70.0
+          - 3.80 -> 60.0
+          - 3.75 -> 50.0
+          - 3.68 -> 40.0
+          - 3.58 -> 30.0
+          - 3.49 -> 20.0
+          - 3.41 -> 10.0
+          - 3.30 -> 5.0
+          - 3.27 -> 0.0
+      - clamp:
+          min_value: 0
+          max_value: 100
+    on_value:
+      then:
+        - lambda: |-
+            const float low_battery_threshold = ${low_battery_level_threshold};
+            bool next_low_battery = x <= low_battery_threshold;
+            bool changed = id(low_battery_active) != next_low_battery;
+
+            id(low_battery_active) = next_low_battery;
+            id(low_battery_display_refresh_pending) =
+              changed && (!id(last_payload_body).empty() || !id(last_error_text).empty());
+            if (changed && id(last_payload_body).empty()) {
+              id(force_full_refresh_requested) = true;
+            }
+        - if:
+            condition:
+              lambda: return id(low_battery_display_refresh_pending);
+            then:
+              - component.update: epaper_display
+              - lambda: id(low_battery_display_refresh_pending) = false;
+
+text_sensor:
+  - platform: template
+    name: "${friendly_name} Power Profile"
+    icon: "mdi:power-plug-battery"
+    update_interval: ${power_profile_update_interval}
+    lambda: |-
+      if (!id(battery_sample_ready)) {
+        return {"检测中"};
+      }
+
+      if (id(external_power_connected)) {
+        return {"插电高实时"};
+      }
+
+      auto now = id(sntp_clock).now();
+      if (now.is_valid() &&
+          (now.hour >= ${battery_quiet_start_hour} || now.hour < ${battery_quiet_end_hour})) {
+        return {"电池夜间静默"};
+      }
+
+      return {"电池省电"};
+
+time:
+  - platform: sntp
+    id: sntp_clock
+    timezone: ${time_zone}
+    on_time:
+      - hours: ${battery_quiet_start_hour}
+        minutes: 0
+        seconds: 0
+        then:
+          - if:
+              condition:
+                lambda: return id(battery_sample_ready) && !id(external_power_connected);
+              then:
+                - logger.log: "battery quiet hours started, entering deep sleep"
+                - deep_sleep.enter:
+                    id: quiet_hours_sleep
+                    until: "10:00:00"
+                    time_id: sntp_clock
+      - hours: ${battery_quiet_end_hour}
+        minutes: 0
+        seconds: 0
+        then:
+          - script.execute: run_power_aware_refresh
+
+deep_sleep:
+  id: quiet_hours_sleep
+  wakeup_pin:
+    number: GPIO4
+    mode: INPUT_PULLUP
+    inverted: true
+    allow_other_uses: true
+  wakeup_pin_mode: INVERT_WAKEUP
+
 spi:
   clk_pin: GPIO7
   mosi_pin: GPIO9
 
 script:
-  - id: fetch_dashboard_payload
+  - id: sample_battery
     mode: restart
+    then:
+      - output.turn_on: bsp_battery_enable
+      - delay: 200ms
+      - component.update: battery_voltage
+      - component.update: battery_level
+      - output.turn_off: bsp_battery_enable
+
+  - id: enter_battery_sleep
+    mode: restart
+    then:
+      - if:
+          condition:
+            lambda: return id(battery_sample_ready) && !id(external_power_connected);
+          then:
+            - output.turn_off: bsp_battery_enable
+            - lambda: id(manual_wake_refresh_requested) = false;
+            - if:
+                condition:
+                  lambda: |-
+                    auto now = id(sntp_clock).now();
+                    return now.is_valid() &&
+                      (now.hour >= ${battery_quiet_start_hour} ||
+                       now.hour < ${battery_quiet_end_hour});
+                then:
+                  - logger.log: "battery quiet hours active, sleeping until 10:00"
+                  - deep_sleep.enter:
+                      id: quiet_hours_sleep
+                      until: "10:00:00"
+                      time_id: sntp_clock
+                else:
+                  - if:
+                      condition:
+                        lambda: return id(low_battery_active);
+                      then:
+                        - logger.log: "low battery cycle finished, entering extended deep sleep"
+                        - lambda: |-
+                            id(quiet_hours_sleep).set_sleep_duration(
+                              ${low_battery_wake_interval_minutes}UL * 60UL * 1000UL
+                            );
+                        - deep_sleep.enter: quiet_hours_sleep
+                      else:
+                        - logger.log: "battery cycle finished, entering deep sleep"
+                        - lambda: |-
+                            id(quiet_hours_sleep).set_sleep_duration(
+                              ${battery_wake_interval_minutes}UL * 60UL * 1000UL
+                            );
+                        - deep_sleep.enter: quiet_hours_sleep
+
+  - id: battery_awake_watchdog
+    mode: restart
+    then:
+      - delay: ${battery_awake_timeout}
+      - if:
+          condition:
+            lambda: return id(battery_sample_ready) && !id(external_power_connected);
+          then:
+            - logger.log: "battery awake timeout reached, forcing deep sleep"
+            - script.execute: enter_battery_sleep
+
+  - id: run_power_aware_refresh
+    mode: single
+    then:
+      - if:
+          condition:
+            lambda: |-
+              if (!id(battery_sample_ready)) {
+                return false;
+              }
+
+              if (id(manual_wake_refresh_requested)) {
+                return true;
+              }
+
+              if (id(external_power_connected)) {
+                return true;
+              }
+
+              auto now = id(sntp_clock).now();
+              if (!now.is_valid()) {
+                // A cold boot may connect before SNTP. Fetch once; the sleep
+                // decision will use wall-clock time if it becomes available.
+                return true;
+              }
+
+              return now.hour < ${battery_quiet_end_hour} ||
+                now.hour >= ${battery_quiet_start_hour}
+                ? false
+                : true;
+          then:
+            - script.execute: fetch_dashboard_payload
+          else:
+            - if:
+                condition:
+                  lambda: |-
+                    if (!id(battery_sample_ready) || id(external_power_connected)) {
+                      return false;
+                    }
+
+                    auto now = id(sntp_clock).now();
+                    return now.is_valid() &&
+                      (now.hour >= ${battery_quiet_start_hour} ||
+                       now.hour < ${battery_quiet_end_hour});
+                then:
+                  - script.execute: enter_battery_sleep
+
+  - id: fetch_dashboard_payload
+    mode: single
     then:
       - http_request.get:
           url: !secret infohub_eink_device_url
@@ -194,7 +528,9 @@ script:
                       id(last_error_text) = next_error;
                       // Keep the previous E-Ink frame when the device reboots
                       // but the first refetch still has not succeeded yet.
-                      should_refresh = has_cached_payload;
+                      should_refresh = has_cached_payload || id(manual_wake_refresh_requested);
+                    } else if (id(manual_wake_refresh_requested)) {
+                      should_refresh = true;
                     }
                     id(pending_display_refresh) = should_refresh;
                     return;
@@ -205,15 +541,24 @@ script:
                   int next_claude_requests = 0;
                   int next_claude_enabled = 0;
 
-                  std::string next_sub2api_value = "--";
-                  std::string next_sub2api_cost = "--";
-                  int next_sub2api_requests = 0;
-                  int next_sub2api_enabled = 0;
+                  std::string next_codex_value = "--";
+                  std::string next_codex_cost = "--";
+                  int next_codex_requests = 0;
+                  int next_codex_enabled = 0;
 
                   std::string next_total_value = "--";
                   std::string next_total_cost = "--";
                   int next_total_requests = 0;
                   int next_total_alerts = 0;
+                  bool had_runtime_payload = !id(last_payload_body).empty();
+                  uint32_t next_payload_fingerprint = 2166136261U;
+
+                  auto extend_fingerprint = [&](const char *data, size_t length) {
+                    for (size_t index = 0; index < length; index++) {
+                      next_payload_fingerprint ^= static_cast<uint8_t>(data[index]);
+                      next_payload_fingerprint *= 16777619U;
+                    }
+                  };
 
                   bool parsed = json::parse_json(body, [&](JsonObject root) -> bool {
                     JsonObject claude_obj = root["claude"];
@@ -224,13 +569,13 @@ script:
                     next_claude_requests = claude_obj["requests"] | 0;
                     next_claude_enabled = claude_obj["enabled"] | 0;
 
-                    JsonObject sub2api_obj = root["sub2api"];
-                    const char *sub2api_value = sub2api_obj["value"] | "--";
-                    const char *sub2api_cost = sub2api_obj["cost"] | "--";
-                    next_sub2api_value = sub2api_value != nullptr ? sub2api_value : "--";
-                    next_sub2api_cost = sub2api_cost != nullptr ? sub2api_cost : "--";
-                    next_sub2api_requests = sub2api_obj["requests"] | 0;
-                    next_sub2api_enabled = sub2api_obj["enabled"] | 0;
+                    JsonObject codex_obj = root["codex"];
+                    const char *codex_value = codex_obj["value"] | "--";
+                    const char *codex_cost = codex_obj["cost"] | "--";
+                    next_codex_value = codex_value != nullptr ? codex_value : "--";
+                    next_codex_cost = codex_cost != nullptr ? codex_cost : "--";
+                    next_codex_requests = codex_obj["requests"] | 0;
+                    next_codex_enabled = codex_obj["enabled"] | 0;
 
                     JsonObject total_obj = root["total"];
                     const char *total_value = total_obj["value"] | "--";
@@ -239,6 +584,22 @@ script:
                     next_total_cost = total_cost != nullptr ? total_cost : "--";
                     next_total_requests = total_obj["requests"] | 0;
                     next_total_alerts = total_obj["alerts"] | 0;
+
+                    // Exclude updated_at fields: collection timestamps alone should
+                    // not wake the panel. Hash every value that affects rendering.
+                    const char *semantic_keys[] = {
+                      "refresh_seconds", "claude", "codex", "total",
+                      "claude_rows", "codex_rows", "alerts", "reset_hints"
+                    };
+                    for (const char *key : semantic_keys) {
+                      std::string serialized_value;
+                      JsonVariant value = root[key];
+                      serializeJson(value, serialized_value);
+                      extend_fingerprint(key, strlen(key));
+                      extend_fingerprint(serialized_value.data(), serialized_value.size());
+                    }
+                    const char battery_state = id(low_battery_active) ? '1' : '0';
+                    extend_fingerprint(&battery_state, 1);
                     return true;
                   });
 
@@ -247,7 +608,9 @@ script:
                     bool has_cached_payload = !id(last_payload_body).empty();
                     if (id(last_error_text) != next_error) {
                       id(last_error_text) = next_error;
-                      should_refresh = has_cached_payload;
+                      should_refresh = has_cached_payload || id(manual_wake_refresh_requested);
+                    } else if (id(manual_wake_refresh_requested)) {
+                      should_refresh = true;
                     }
                     id(pending_display_refresh) = should_refresh;
                     return;
@@ -272,20 +635,20 @@ script:
                     metrics_changed = true;
                   }
 
-                  if (id(sub2api_value_live) != next_sub2api_value) {
-                    id(sub2api_value_live) = next_sub2api_value;
+                  if (id(codex_value_live) != next_codex_value) {
+                    id(codex_value_live) = next_codex_value;
                     metrics_changed = true;
                   }
-                  if (id(sub2api_cost_live) != next_sub2api_cost) {
-                    id(sub2api_cost_live) = next_sub2api_cost;
+                  if (id(codex_cost_live) != next_codex_cost) {
+                    id(codex_cost_live) = next_codex_cost;
                     metrics_changed = true;
                   }
-                  if (id(sub2api_requests_live) != next_sub2api_requests) {
-                    id(sub2api_requests_live) = next_sub2api_requests;
+                  if (id(codex_requests_live) != next_codex_requests) {
+                    id(codex_requests_live) = next_codex_requests;
                     metrics_changed = true;
                   }
-                  if (id(sub2api_enabled_live) != next_sub2api_enabled) {
-                    id(sub2api_enabled_live) = next_sub2api_enabled;
+                  if (id(codex_enabled_live) != next_codex_enabled) {
+                    id(codex_enabled_live) = next_codex_enabled;
                     metrics_changed = true;
                   }
 
@@ -306,10 +669,29 @@ script:
                     metrics_changed = true;
                   }
 
-                  bool needs_full_payload_sync = id(force_full_refresh_requested) || id(last_payload_body).empty();
-                  bool body_changed = id(last_payload_body) != body;
+                  // Live metric globals reset on every deep-sleep wake. The compact
+                  // semantic fingerprint is persisted so an unchanged payload does
+                  // not cause a redundant E-Ink refresh after reboot.
+                  if (!had_runtime_payload) {
+                    metrics_changed = false;
+                  }
 
-                  if (body_changed && !needs_full_payload_sync) {
+                  bool semantic_changed =
+                    !id(payload_fingerprint_ready) ||
+                    id(payload_fingerprint) != next_payload_fingerprint;
+                  bool needs_full_payload_sync =
+                    id(force_full_refresh_requested) ||
+                    (!had_runtime_payload && semantic_changed);
+                  bool body_changed = !had_runtime_payload || id(last_payload_body) != body;
+
+                  if (!had_runtime_payload) {
+                    // Keep the current body in RAM for a possible redraw during this
+                    // wake cycle; only the fingerprint crosses deep sleep.
+                    id(last_payload_body) = body;
+                    id(staged_payload_body).clear();
+                  }
+
+                  if (had_runtime_payload && body_changed && !needs_full_payload_sync) {
                     id(staged_payload_body) = body;
                   }
 
@@ -326,6 +708,11 @@ script:
                     id(last_payload_body) = body;
                     id(staged_payload_body).clear();
                     id(partial_refresh_counter) = 0;
+                    // Commit the fingerprint only with a full-frame payload.
+                    // Partial updates intentionally leave it pointing at the
+                    // last complete frame so the next deep-sleep wake can catch up.
+                    id(payload_fingerprint) = next_payload_fingerprint;
+                    id(payload_fingerprint_ready) = true;
                     should_refresh = true;
                   }
 
@@ -347,7 +734,9 @@ script:
               - lambda: |-
                   std::string next_error = "network error";
                   bool has_cached_payload = !id(last_payload_body).empty();
-                  bool should_refresh = has_cached_payload && id(last_error_text) != next_error;
+                  bool should_refresh =
+                    id(manual_wake_refresh_requested) ||
+                    (has_cached_payload && id(last_error_text) != next_error);
                   id(last_error_text) = next_error;
                   id(pending_display_refresh) = should_refresh;
               - if:
@@ -356,11 +745,25 @@ script:
                   then:
                     - component.update: epaper_display
                     - lambda: id(pending_display_refresh) = false;
+      - lambda: id(manual_wake_refresh_requested) = false;
+      - script.execute: enter_battery_sleep
 
 interval:
-  - interval: ${poll_interval}
+  - interval: ${plugged_poll_interval}
     then:
-      - script.execute: fetch_dashboard_payload
+      - if:
+          condition:
+            lambda: return id(battery_sample_ready) && id(external_power_connected);
+          then:
+            - script.execute: run_power_aware_refresh
+
+  - interval: ${battery_sensor_update_interval}
+    then:
+      - if:
+          condition:
+            lambda: return id(battery_sample_ready) && id(external_power_connected);
+          then:
+            - script.execute: sample_battery
 
 button:
   - platform: template
@@ -376,6 +779,18 @@ binary_sensor:
       mode: INPUT_PULLUP
       inverted: true
     name: "${friendly_name} Refresh Button"
+    on_press:
+      then:
+        - lambda: id(force_full_refresh_requested) = true;
+        - script.execute: fetch_dashboard_payload
+
+  - platform: gpio
+    pin:
+      number: GPIO4
+      mode: INPUT_PULLUP
+      inverted: true
+      allow_other_uses: true
+    name: "${friendly_name} Wake Button"
     on_press:
       then:
         - lambda: id(force_full_refresh_requested) = true;
@@ -664,20 +1079,20 @@ display:
       };
 
       OverviewData claude = {"Claude", "--", 0, "--", 0, -1, 0};
-      OverviewData sub2api = {"Codex", "--", 0, "--", 0, -1, 0};
+      OverviewData codex = {"Codex", "--", 0, "--", 0, -1, 0};
       OverviewData total = {"合计", "--", 0, "--", 0, -1, 0};
 
       RowData claude_rows[2] = {{"--", -1, -1, "--"}, {"--", -1, -1, "--"}};
-      RowData sub2api_rows[2] = {{"--", -1, -1, "--"}, {"--", -1, -1, "--"}};
+      RowData codex_rows[2] = {{"--", -1, -1, "--"}, {"--", -1, -1, "--"}};
       int claude_row_count = 0;
-      int sub2api_row_count = 0;
+      int codex_row_count = 0;
 
       std::string alert_lines[3] = {"暂无告警", "", ""};
       int alert_count = 0;
 
       std::string updated_at = "--";
       std::string reset_claude = "--";
-      std::string reset_sub2api = "--";
+      std::string reset_codex = "--";
       int refresh_seconds = 0;
 
       auto format_token_m = [&](const OverviewData &item) -> std::string {
@@ -701,7 +1116,7 @@ display:
         return "$" + cost;
       };
 
-      auto draw_overview_card = [&](const Rect &box, const std::string &title, const OverviewData &item, bool show_alerts) {
+      auto draw_overview_card = [&](const Rect &box, const std::string &title, const OverviewData &item) {
         std::string fitted_title = fit_text_width(id(font_label), title, box.w - 24);
         std::string value_m = format_token_m(item);
         std::string money_text = format_money(item.cost);
@@ -716,18 +1131,6 @@ display:
         it.end_clipping();
 
         it.line(box.x + 12, divider_y, box.x + box.w - 12, divider_y);
-        if (show_alerts && item.alerts > 0) {
-          it.printf(
-            box.x + 12,
-            divider_y + 7,
-            id(font_sm),
-            "%s",
-            fit_text_width(id(font_sm), money_text, box.w - 104).c_str()
-          );
-          it.printf(box.x + box.w - 12, divider_y + 7, id(font_sm), TextAlign::TOP_RIGHT, "告警 %d", item.alerts);
-          return;
-        }
-
         it.printf(box.x + 12, divider_y + 7, id(font_sm), "%s", fit_text_width(id(font_sm), money_text, box.w - 24).c_str());
       };
 
@@ -796,17 +1199,17 @@ display:
       };
 
       auto draw_quota_card = [&](const Rect &box, const std::string &title, const std::string &reset_text, const RowData &row, bool show_reset) {
-        int metric_top = box.y + (show_reset ? 52 : 39);
-        int track_y = box.y + (show_reset ? 78 : 63);
-        int divider_top = box.y + (show_reset ? 53 : 38);
-        int divider_bottom = box.y + (show_reset ? 94 : 79);
+        int metric_top = box.y + (show_reset ? 63 : 39);
+        int track_y = box.y + (show_reset ? 91 : 63);
+        int divider_top = box.y + (show_reset ? 64 : 38);
+        int divider_bottom = box.y + (show_reset ? 107 : 79);
         Rect five_track{box.x + 12, track_y, 190, 9};
         Rect week_track{box.x + 252, track_y, 230, 9};
 
         draw_outline_round_rect(box, 0);
         it.printf(box.x + 12, box.y + 10, id(font_title), "%s", fit_text_width(id(font_title), title, box.w - 24).c_str());
         if (show_reset) {
-          it.printf(box.x + 12, box.y + 32, id(font_xs), "%s", fit_text_width(id(font_xs), reset_text, box.w - 24).c_str());
+          it.printf(box.x + 12, box.y + 36, id(font_xs), "%s", fit_text_width(id(font_xs), reset_text, box.w - 24).c_str());
         }
 
         it.printf(box.x + 12, metric_top, id(font_metric), "5H");
@@ -882,14 +1285,14 @@ display:
           claude.enabled = claude_obj["enabled"] | -1;
           claude.value_numeric = claude_obj["value_numeric"] | 0;
 
-          JsonObject sub2api_obj = root["sub2api"];
-          const char *sub_value = sub2api_obj["value"] | "--";
-          const char *sub_cost = sub2api_obj["cost"] | "--";
-          sub2api.value = sub_value != nullptr ? sub_value : "--";
-          sub2api.cost = sub_cost != nullptr ? sub_cost : "--";
-          sub2api.requests = sub2api_obj["requests"] | 0;
-          sub2api.enabled = sub2api_obj["enabled"] | -1;
-          sub2api.value_numeric = sub2api_obj["value_numeric"] | 0;
+          JsonObject codex_obj = root["codex"];
+          const char *codex_value = codex_obj["value"] | "--";
+          const char *codex_cost = codex_obj["cost"] | "--";
+          codex.value = codex_value != nullptr ? codex_value : "--";
+          codex.cost = codex_cost != nullptr ? codex_cost : "--";
+          codex.requests = codex_obj["requests"] | 0;
+          codex.enabled = codex_obj["enabled"] | -1;
+          codex.value_numeric = codex_obj["value_numeric"] | 0;
 
           JsonObject total_obj = root["total"];
           const char *total_value = total_obj["value"] | "--";
@@ -912,14 +1315,14 @@ display:
             }
           }
 
-          JsonArray sub2api_array = root["sub2api_rows"].as<JsonArray>();
-          if (!sub2api_array.isNull()) {
-            for (JsonVariant row_var : sub2api_array) {
-              if (sub2api_row_count >= 2) {
+          JsonArray codex_array = root["codex_rows"].as<JsonArray>();
+          if (!codex_array.isNull()) {
+            for (JsonVariant row_var : codex_array) {
+              if (codex_row_count >= 2) {
                 break;
               }
-              load_row(row_var.as<JsonObject>(), sub2api_rows[sub2api_row_count]);
-              sub2api_row_count++;
+              load_row(row_var.as<JsonObject>(), codex_rows[codex_row_count]);
+              codex_row_count++;
             }
           }
 
@@ -937,11 +1340,17 @@ display:
 
           JsonObject reset_obj = root["reset_hints"];
           const char *reset_claude_text = reset_obj["claude_five_hour"] | "--";
-          const char *reset_sub2api_text = reset_obj["sub2api_five_hour"] | "--";
+          const char *reset_codex_text = reset_obj["codex_five_hour"] | "--";
           reset_claude = reset_claude_text != nullptr ? reset_claude_text : "--";
-          reset_sub2api = reset_sub2api_text != nullptr ? reset_sub2api_text : "--";
+          reset_codex = reset_codex_text != nullptr ? reset_codex_text : "--";
           return true;
         });
+      }
+
+      if (parsed && id(battery_sample_ready) && !id(external_power_connected)) {
+        refresh_seconds = id(low_battery_active)
+          ? ${low_battery_wake_interval_minutes} * 60
+          : ${battery_wake_interval_minutes} * 60;
       }
 
       std::string status_text = "首次拉取";
@@ -958,10 +1367,10 @@ display:
       claude.requests = id(claude_requests_live);
       claude.enabled = id(claude_enabled_live);
 
-      sub2api.value = id(sub2api_value_live);
-      sub2api.cost = id(sub2api_cost_live);
-      sub2api.requests = id(sub2api_requests_live);
-      sub2api.enabled = id(sub2api_enabled_live);
+      codex.value = id(codex_value_live);
+      codex.cost = id(codex_cost_live);
+      codex.requests = id(codex_requests_live);
+      codex.enabled = id(codex_enabled_live);
 
       total.value = id(total_value_live);
       total.cost = id(total_cost_live);
@@ -969,7 +1378,7 @@ display:
       total.alerts = id(total_alerts_live);
 
       RowData claude_focus = pick_focus_row(claude_rows, claude_row_count);
-      RowData sub2api_focus = pick_focus_row(sub2api_rows, sub2api_row_count);
+      RowData codex_focus = pick_focus_row(codex_rows, codex_row_count);
       std::string alert_title = "暂无告警";
       std::string alert_detail;
       if (alert_count > 0) {
@@ -979,21 +1388,30 @@ display:
       Rect frame{9, 9, 782, 462};
       Rect header{18, 17, 764, 36};
       Rect overview_claude{18, 58, 248, 130};
-      Rect overview_sub2api{276, 58, 248, 130};
+      Rect overview_codex{276, 58, 248, 130};
       Rect overview_total{534, 58, 248, 130};
       Rect quota_claude{18, 193, 506, 135};
-      Rect quota_sub2api{18, 333, 506, 138};
+      Rect quota_codex{18, 333, 506, 138};
       Rect system_panel{534, 193, 248, 278};
       Rect failure_panel{18, 58, 764, 413};
 
+      bool show_low_battery_badge = id(low_battery_active);
+      std::string low_battery_text = "低电量";
+      int low_battery_badge_w = show_low_battery_badge ? badge_width(id(font_badge), low_battery_text, 78, 116, 12) : 0;
+
       std::string header_status = "状态 " + trim_text(status_text, 10);
-      int header_badge_w = badge_width(id(font_badge), header_status, 90, 176, 12);
+      int status_badge_max_width = show_low_battery_badge ? 132 : 176;
+      int header_badge_w = badge_width(id(font_badge), header_status, 90, status_badge_max_width, 12);
       Rect header_badge{right_of(header) - 10 - header_badge_w, 21, header_badge_w, 24};
+      Rect low_battery_badge{header_badge.x - 8 - low_battery_badge_w, 21, low_battery_badge_w, 24};
 
       draw_outline_round_rect(frame, 5);
       draw_outline_round_rect(header, 4);
       it.printf(header.x + 10, header.y + 5, id(font_header), "InfoHub");
       it.printf(header.x + header.w / 2, header.y + 7, id(font_time), TextAlign::TOP_CENTER, "%s", fit_text_width(id(font_time), updated_at, 260).c_str());
+      if (show_low_battery_badge) {
+        draw_badge(low_battery_badge, low_battery_text, false);
+      }
       draw_badge(header_badge, header_status, true);
 
       if (!parsed) {
@@ -1010,10 +1428,10 @@ display:
         return;
       }
 
-      draw_overview_card(overview_claude, "Claude", claude, false);
-      draw_overview_card(overview_sub2api, "Codex", sub2api, false);
-      draw_overview_card(overview_total, "合计", total, true);
+      draw_overview_card(overview_claude, "Claude", claude);
+      draw_overview_card(overview_codex, "Codex", codex);
+      draw_overview_card(overview_total, "合计", total);
 
-      draw_quota_card(quota_claude, "Claude 配额", reset_claude, claude_focus, false);
-      draw_quota_card(quota_sub2api, "Codex 配额", reset_sub2api, sub2api_focus, true);
+      draw_quota_card(quota_claude, "Claude 配额", reset_claude, claude_focus, true);
+      draw_quota_card(quota_codex, "Codex 配额", reset_codex, codex_focus, true);
       draw_system_panel(system_panel, alert_count, alert_title, alert_detail, refresh_seconds);
