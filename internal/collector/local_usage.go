@@ -52,6 +52,7 @@ type localUsageBucket struct {
 	Reasoning     float64
 	Messages      float64
 	Models        map[string]float64
+	ModelUsage    map[string]localModelUsage
 }
 
 type localWindow struct {
@@ -230,7 +231,7 @@ func (c *LocalUsageCollector) buildItems(ctx context.Context, events []localUsag
 	windows := c.windows(now)
 	buckets := make(map[string]*localUsageBucket, len(windows))
 	for _, window := range windows {
-		buckets[window.Key] = &localUsageBucket{Models: map[string]float64{}}
+		buckets[window.Key] = newLocalUsageBucket()
 	}
 
 	var latestQuota localRateLimits
@@ -308,8 +309,9 @@ func (c *LocalUsageCollector) buildItems(ctx context.Context, events []localUsag
 	items := make([]model.DataItem, 0, 8)
 	today := buckets["today"]
 	if today == nil {
-		today = &localUsageBucket{Models: map[string]float64{}}
+		today = newLocalUsageBucket()
 	}
+	todayCost := today.costSummary(c.source)
 	items = append(items, model.DataItem{
 		Source:   c.source,
 		Category: "token_usage",
@@ -317,7 +319,7 @@ func (c *LocalUsageCollector) buildItems(ctx context.Context, events []localUsag
 		Value:    formatFloat(today.TotalTokens()),
 		Extra: map[string]any{
 			"daily_requests":        today.Messages,
-			"daily_cost":            0,
+			"daily_cost":            todayCost.TotalCost,
 			"enabled_accounts":      1,
 			"enabled_account_names": []string{c.displayName()},
 			"input":                 today.Input,
@@ -325,6 +327,10 @@ func (c *LocalUsageCollector) buildItems(ctx context.Context, events []localUsag
 			"cache_read":            today.CacheRead,
 			"cache_creation":        today.CacheCreation,
 			"reasoning":             today.Reasoning,
+			"priced_tokens":         todayCost.PricedTokens,
+			"unpriced_tokens":       todayCost.UnpricedTokens,
+			"model_costs":           todayCost.Models,
+			"cost_estimated":        true,
 		},
 	})
 
@@ -342,6 +348,12 @@ func (c *LocalUsageCollector) buildItems(ctx context.Context, events []localUsag
 	}
 
 	if modelName, tokens, ok := topModel(today.Models); ok {
+		topModelCost := 0.0
+		if usage, ok := today.ModelUsage[modelName]; ok {
+			if price, ok := localPriceForModel(c.source, modelName); ok {
+				topModelCost = roundLocalCost(localUsageCost(usage, price))
+			}
+		}
 		items = append(items, model.DataItem{
 			Source:   c.source,
 			Category: "usage",
@@ -349,6 +361,7 @@ func (c *LocalUsageCollector) buildItems(ctx context.Context, events []localUsag
 			Value:    modelName,
 			Extra: map[string]any{
 				"tokens":        tokens,
+				"cost":          topModelCost,
 				"share_percent": percentOf(tokens, today.TotalTokens()),
 			},
 		})
@@ -438,20 +451,25 @@ func (c *LocalUsageCollector) quotaItem(window localWindow, bucket *localUsageBu
 }
 
 func (c *LocalUsageCollector) windowUsageItem(window localWindow, bucket *localUsageBucket) model.DataItem {
+	cost := bucket.costSummary(c.source)
 	return model.DataItem{
 		Source:   c.source,
 		Category: "quota",
 		Title:    window.Title,
 		Value:    formatFloat(bucket.TotalTokens()) + " tokens",
 		Extra: map[string]any{
-			"window":         window.Key,
-			"input":          bucket.Input,
-			"output":         bucket.Output,
-			"cache_read":     bucket.CacheRead,
-			"cache_creation": bucket.CacheCreation,
-			"reasoning":      bucket.Reasoning,
-			"messages":       bucket.Messages,
-			"models":         bucket.Models,
+			"window":          window.Key,
+			"input":           bucket.Input,
+			"output":          bucket.Output,
+			"cache_read":      bucket.CacheRead,
+			"cache_creation":  bucket.CacheCreation,
+			"reasoning":       bucket.Reasoning,
+			"messages":        bucket.Messages,
+			"models":          bucket.Models,
+			"cost":            cost.TotalCost,
+			"priced_tokens":   cost.PricedTokens,
+			"unpriced_tokens": cost.UnpricedTokens,
+			"model_costs":     cost.Models,
 		},
 	}
 }
@@ -497,6 +515,13 @@ func (c *LocalUsageCollector) displayName() string {
 	return "Claude Local"
 }
 
+func newLocalUsageBucket() *localUsageBucket {
+	return &localUsageBucket{
+		Models:     map[string]float64{},
+		ModelUsage: map[string]localModelUsage{},
+	}
+}
+
 func (b *localUsageBucket) add(event localUsageEvent) {
 	b.Tokens += event.TotalTokens()
 	b.Input += event.Input
@@ -509,7 +534,17 @@ func (b *localUsageBucket) add(event localUsageEvent) {
 	if modelName == "" {
 		modelName = "unknown"
 	}
-	b.Models[modelName] += event.TotalTokens()
+	tokens := event.TotalTokens()
+	b.Models[modelName] += tokens
+	usage := b.ModelUsage[modelName]
+	usage.Tokens += tokens
+	usage.Input += event.Input
+	usage.Output += event.Output
+	usage.CacheRead += event.CacheRead
+	usage.CacheCreation += event.CacheCreation
+	usage.Reasoning += event.Reasoning
+	usage.Messages++
+	b.ModelUsage[modelName] = usage
 }
 
 func (b localUsageBucket) TotalTokens() float64 {

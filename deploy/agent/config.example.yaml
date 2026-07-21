@@ -13,7 +13,7 @@ server:
 machine_id: ""
 
 # 常驻模式下的扫描间隔（秒）；用 launchd/cron + -once 时忽略
-interval_seconds: 300
+interval_seconds: 120
 
 # 增量扫描游标状态文件；留空默认 ~/.local/state/infohub-agent/state.json
 state_path: ""

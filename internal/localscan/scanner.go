@@ -223,6 +223,7 @@ func (s *Scanner) parseJSONL(path string) ([]Event, error) {
 	scanner.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
 
 	var events []Event
+	lastModel := ""
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" {
@@ -236,8 +237,12 @@ func (s *Scanner) parseJSONL(path string) ([]Event, error) {
 			continue
 		}
 
+		lastModel = s.inheritModel(payload, lastModel)
 		event, ok := ExtractEvent(s.Source, payload)
 		if ok {
+			if strings.TrimSpace(event.Model) == "" {
+				event.Model = lastModel
+			}
 			events = append(events, event)
 		}
 	}
@@ -263,6 +268,7 @@ func (s *Scanner) parseJSONLRecords(path string, offset int64) ([]store.LocalUsa
 	reader := bufio.NewReaderSize(file, 256*1024)
 	currentOffset := offset
 	var records []store.LocalUsageRecord
+	lastModel := ""
 	for {
 		lineOffset := currentOffset
 		line, err := reader.ReadString('\n')
@@ -272,7 +278,11 @@ func (s *Scanner) parseJSONLRecords(path string, offset int64) ([]store.LocalUsa
 			decoder := json.NewDecoder(strings.NewReader(line))
 			decoder.UseNumber()
 			if err := decoder.Decode(&payload); err == nil {
+				lastModel = s.inheritModel(payload, lastModel)
 				if event, ok := ExtractEvent(s.Source, payload); ok {
+					if strings.TrimSpace(event.Model) == "" {
+						event.Model = lastModel
+					}
 					records = append(records, RecordFromEvent(s.Source, path, lineOffset, event))
 				}
 			}
@@ -286,4 +296,24 @@ func (s *Scanner) parseJSONLRecords(path string, offset int64) ([]store.LocalUsa
 		return records, currentOffset, err
 	}
 	return records, currentOffset, nil
+}
+
+func (s *Scanner) inheritModel(payload any, current string) string {
+	if s.Source != SourceCodex {
+		return current
+	}
+	record, ok := payload.(map[string]any)
+	if !ok {
+		return current
+	}
+	model := FirstNestedString(record,
+		"payload.model",
+		"payload.response.model",
+		"response.model",
+		"model",
+	)
+	if model == "" {
+		return current
+	}
+	return model
 }

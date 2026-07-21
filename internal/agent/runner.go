@@ -88,10 +88,12 @@ func (r *Runner) runSource(ctx context.Context, state *stateFile, source string,
 		Now:    r.now,
 	}
 
+	scanStart := time.Now()
 	nextStates, records, err := scanner.ScanIncremental(ctx, state.parseStates(source))
 	if err != nil {
 		return err
 	}
+	scanDuration := time.Since(scanStart)
 
 	var resetFiles []string
 	for _, next := range nextStates {
@@ -100,7 +102,16 @@ func (r *Runner) runSource(ctx context.Context, state *stateFile, source string,
 		}
 	}
 
+	quotaStart := time.Now()
 	quota := r.fetchQuota(ctx, source)
+	quotaDuration := time.Since(quotaStart)
+
+	r.logger.Info("agent local collect complete",
+		"source", source,
+		"records", len(records),
+		"scan_duration", scanDuration,
+		"quota_duration", quotaDuration,
+	)
 
 	if len(records) == 0 && len(resetFiles) == 0 && quota == nil {
 		r.logger.Debug("agent source up to date", "source", source)
@@ -113,6 +124,7 @@ func (r *Runner) runSource(ctx context.Context, state *stateFile, source string,
 	if len(chunks) == 0 {
 		chunks = [][]store.LocalUsageRecord{nil}
 	}
+	pushStart := time.Now()
 	for index, chunk := range chunks {
 		var (
 			chunkResets []string
@@ -128,7 +140,13 @@ func (r *Runner) runSource(ctx context.Context, state *stateFile, source string,
 	}
 
 	state.apply(source, nextStates)
-	r.logger.Info("agent push complete", "source", source, "records", len(records), "reset_files", len(resetFiles), "quota_attached", quota != nil)
+	r.logger.Info("agent push complete",
+		"source", source,
+		"records", len(records),
+		"reset_files", len(resetFiles),
+		"quota_attached", quota != nil,
+		"push_duration", time.Since(pushStart),
+	)
 	return nil
 }
 

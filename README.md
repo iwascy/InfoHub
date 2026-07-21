@@ -53,6 +53,8 @@ docker run -p 8080:8080 \
 
 完整配置请以 [config.yaml](config.yaml) 和 [dist/config.yaml](dist/config.yaml) 为准。下面是主要结构摘要：
 
+各服务、采集器、agent、仪表盘和 ESPHome 设备接口的接入方式，见 [服务与采集器使用说明](docs/zh/infohub-services-usage.md)。
+
 ```yaml
 server:
   port: ${INFOHUB_PORT}
@@ -232,9 +234,17 @@ cp deploy/agent/config.example.yaml ~/.config/infohub-agent/config.yaml
 # 先交互式跑一次（完成 Keychain 授权并全量补传历史数据）
 infohub-agent -once
 
-# 用 LaunchAgent 每 5 分钟定时上报
+# 用 LaunchAgent 每 120 秒定时上报
 cp deploy/agent/com.infohub.agent.plist ~/Library/LaunchAgents/
 launchctl load ~/Library/LaunchAgents/com.infohub.agent.plist
+
+# 或用 Supervisor 常驻运行（Linux/服务器）
+sudo mkdir -p /etc/infohub-agent /var/log/infohub-agent /var/lib/infohub-agent
+sudo cp deploy/agent/config.example.yaml /etc/infohub-agent/config.yaml
+# 编辑 supervisor 模板里的 user/HOME，并确保日志和状态目录归该用户
+sudo cp deploy/agent/supervisor/infohub-agent.conf /etc/supervisor/conf.d/infohub-agent.conf
+sudo supervisorctl reread
+sudo supervisorctl update
 ```
 
 ### 本机查看用量（无需服务器）
@@ -267,7 +277,7 @@ internal/
   scheduler/          基于 Cron 的任务调度
   store/              存储接口（SQLite、内存）
 deploy/
-  agent/              infohub-agent 配置示例与 launchd plist
+  agent/              infohub-agent 配置示例、launchd plist 与 Supervisor 配置
   esphome/            ESPHome 设备配置（电子墨水屏）
 docs/
   zh/                 中文专题文档
@@ -297,6 +307,7 @@ InfoHub 通过 ESPHome 提供完整的电子纸屏支持：
 
 详细配置指南请参阅 [`docs/zh/`](docs/zh/) 目录：
 
+- [服务与采集器使用说明](docs/zh/infohub-services-usage.md)
 - [首次刷机指南](docs/zh/infohub-eink-first-flash-runbook.md)
 - [直连 API 面板](docs/zh/infohub-eink-direct-api-panel.md)
 - [部署与显示调优](docs/zh/infohub-eink-deploy-and-display-tuning.md)

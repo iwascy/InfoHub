@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"strconv"
 	"strings"
+	"time"
 
 	"infohub/internal/collector"
 	"infohub/internal/config"
@@ -40,12 +41,16 @@ func PrintLocalUsage(ctx context.Context, cfg Config, logger *slog.Logger, w io.
 			}
 		}
 
+		collectStart := time.Now()
 		items, err := localCollector.Collect(ctx)
 		if err != nil {
 			if logger != nil {
 				logger.Warn("local usage scan failed", "source", source, "error", err)
 			}
 			continue
+		}
+		if logger != nil {
+			logger.Info("local usage scan complete", "source", source, "items", len(items), "duration", time.Since(collectStart))
 		}
 		results[source] = items
 	}

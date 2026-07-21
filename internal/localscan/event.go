@@ -12,7 +12,7 @@ const (
 	SourceCodex  = "codex_local"
 
 	claudeParserVersion = 1
-	codexParserVersion  = 1
+	codexParserVersion  = 2
 )
 
 // ParserVersion reports the JSONL parser version for a local usage source.

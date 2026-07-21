@@ -66,6 +66,9 @@ func TestClaudeLocalCollectorCollectsBuiltinJSONL(t *testing.T) {
 	if got := tokenItem.Extra["cache_read"]; got != 25.0 {
 		t.Fatalf("unexpected cache read: %v", got)
 	}
+	if got := tokenItem.Extra["daily_cost"]; got != 0.00132 {
+		t.Fatalf("unexpected daily cost: %v", got)
+	}
 
 	quotaItem := mustFindItem(t, items, "账号 Claude Local 5H 额度")
 	if quotaItem.Value != "80%" {
@@ -152,6 +155,12 @@ func TestCodexLocalCollectorCollectsBuiltinJSONL(t *testing.T) {
 	}
 	if got := tokenItem.Extra["reasoning"]; got != 170.0 {
 		t.Fatalf("unexpected reasoning total: %v", got)
+	}
+	if got := tokenItem.Extra["daily_cost"]; got != 0.01015 {
+		t.Fatalf("unexpected daily cost: %v", got)
+	}
+	if got := tokenItem.Extra["unpriced_tokens"]; got != 0.0 {
+		t.Fatalf("unexpected unpriced tokens: %v", got)
 	}
 
 	fiveHourQuotaItem := mustFindItem(t, items, "账号 Codex Local 5H 额度")

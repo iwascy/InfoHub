@@ -182,6 +182,65 @@ func TestCodexTokenCountQuotaExtraction(t *testing.T) {
 	}
 }
 
+func TestCodexScannerInheritsModelAndSplitsCachedInput(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "rollout-1.jsonl")
+	lines := []map[string]any{
+		{
+			"timestamp": "2026-04-26T10:00:00Z",
+			"type":      "turn_context",
+			"payload": map[string]any{
+				"model": "gpt-5-codex",
+			},
+		},
+		{
+			"timestamp": "2026-04-26T10:01:00Z",
+			"type":      "event_msg",
+			"payload": map[string]any{
+				"type": "token_count",
+				"info": map[string]any{
+					"last_token_usage": map[string]any{
+						"input_tokens":        1000,
+						"cached_input_tokens": 750,
+						"output_tokens":       20,
+						"total_tokens":        1020,
+					},
+				},
+			},
+		},
+	}
+	var raw []byte
+	for _, line := range lines {
+		payload, err := json.Marshal(line)
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		raw = append(raw, payload...)
+		raw = append(raw, '\n')
+	}
+	if err := os.WriteFile(path, raw, 0o644); err != nil {
+		t.Fatalf("write jsonl: %v", err)
+	}
+
+	scanner := &Scanner{Source: SourceCodex, Paths: []string{dir}}
+	events, err := scanner.ScanFull(context.Background())
+	if err != nil {
+		t.Fatalf("ScanFull: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	if events[0].Model != "gpt-5-codex" {
+		t.Fatalf("unexpected inherited model: %q", events[0].Model)
+	}
+	if events[0].Input != 250 || events[0].CacheRead != 750 {
+		t.Fatalf("unexpected input split: input=%v cache=%v", events[0].Input, events[0].CacheRead)
+	}
+	if events[0].TotalTokens() != 1020 {
+		t.Fatalf("unexpected total tokens: %v", events[0].TotalTokens())
+	}
+}
+
 // normalizeJSON round-trips through encoding/json so numbers arrive as
 // json.Number, matching what the scanner's decoder produces.
 func normalizeJSON(t *testing.T, value any) any {

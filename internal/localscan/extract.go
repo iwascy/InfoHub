@@ -76,11 +76,14 @@ func extractCodexEvent(payload any) (Event, bool) {
 		return Event{}, false
 	}
 
+	input := NumberAt(usage, "input_tokens")
+	cacheRead := NumberAt(usage, "cached_input_tokens")
 	return Event{
 		At:        at,
 		Model:     FirstNestedString(record, "payload.model", "response.model", "model", "payload.response.model"),
-		Input:     NumberAt(usage, "input_tokens"),
+		Input:     nonCachedInput(input, cacheRead),
 		Output:    NumberAt(usage, "output_tokens"),
+		CacheRead: cacheRead,
 		Reasoning: NumberAt(usage, "reasoning_tokens"),
 		Total:     FirstNumber(usage, "total_tokens", "totalTokens", "total"),
 	}, true
@@ -113,12 +116,26 @@ func extractCodexTokenCountEvent(record map[string]any) (Event, bool) {
 		Quota: rateLimits,
 	}
 	if usage != nil {
-		event.Input = FirstNumber(usage, "input_tokens", "inputTokens", "input")
+		input := FirstNumber(usage, "input_tokens", "inputTokens", "input")
+		cacheRead := FirstNumber(usage, "cached_input_tokens", "cachedInputTokens", "cached_input")
+		event.Input = nonCachedInput(input, cacheRead)
 		event.Output = FirstNumber(usage, "output_tokens", "outputTokens", "output")
+		event.CacheRead = cacheRead
 		event.Reasoning = FirstNumber(usage, "reasoning_tokens", "reasoning_output_tokens", "reasoningOutputTokens", "reasoning")
 		event.Total = FirstNumber(usage, "total_tokens", "totalTokens", "total")
 	}
 	return event, event.TotalTokens() > 0 || event.Quota.HasAny()
+}
+
+func nonCachedInput(input, cacheRead float64) float64 {
+	if cacheRead <= 0 {
+		return input
+	}
+	nonCached := input - cacheRead
+	if nonCached < 0 {
+		return 0
+	}
+	return nonCached
 }
 
 func extractCodexRateLimits(record map[string]any) RateLimits {

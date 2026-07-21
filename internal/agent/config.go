@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	defaultIntervalSeconds = 300
+	defaultIntervalSeconds = 120
 	defaultPushTimeout     = 15
 	defaultClaudeQuotaTime = 8
 )
