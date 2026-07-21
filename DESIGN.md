@@ -45,6 +45,12 @@ InfoHub 的目标是把多个 AI 服务或本机工具的用量信息收敛到�
 
 `/dashboard/eink` 服务于浏览器截图或人工查看，`/dashboard/eink/device.json` 服务于 ESPHome 直连绘制。两者共享同一份聚合逻辑，但输出形态分离，避免设备端解析 HTML。
 
+### 电池模式采用周期唤醒
+
+reTerminal E1001 在插电时保持在线并按短周期请求；电池供电时改为唤醒、拉取、按需刷新、立即 deep sleep。正常电量每 30 分钟唤醒，低电量延长到 2 小时，夜间继续睡到 10:00。这样把主要功耗从常驻 Wi-Fi 转为短时联网，同时保留 GPIO4 手动唤醒能力。
+
+deep sleep 会重启 ESP32，固件因此只持久化会影响画面的 payload 指纹和局刷计数，不持久化完整 JSON。唤醒后先解析新 payload 并计算语义指纹；业务内容未变化时保留电子纸原画面，避免无意义刷新。采集时间戳不参与指纹，因为时间戳变化本身不值得唤醒面板。
+
 ## 已知限制
 
 - 当前仪表盘主要围绕 Claude 与 Codex 两个展示槽位设计，更多来源需要扩展 dashboard source 配置和布局。
@@ -55,6 +61,7 @@ InfoHub 的目标是把多个 AI 服务或本机工具的用量信息收敛到�
 
 ## 变更历史
 
+- 2026-07-21：E1001 电池模式改为全天周期唤醒，加入低电量 2 小时间隔、60 秒清醒超时、跨 deep sleep 的 payload 指纹和按需电池采样。
 - 2026-04-27：补充 README 与设计文档，明确 SQLite 默认存储、鉴权规则、本地 Claude/Codex 采集器和 Docker 注意事项。
 - 2026-04-26：接入 `claude_local` / `codex_local`，新增 SQLite 本地解析状态和事件表，仪表盘支持本地源展示。
 - 初始版本：实现 Claude Relay、Sub2API、飞书采集，REST API，SQLite/memory store 和电子墨水屏仪表盘。

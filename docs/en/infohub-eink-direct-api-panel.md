@@ -59,11 +59,12 @@ Key points of this template:
 - `update_interval: never` — the display does not refresh on a fixed cycle
 - If the HTTP response body is identical to the previous one, `component.update` is not triggered
 - `GPIO3` is reserved as a physical manual refresh button
-- `GPIO4` also serves as the wake-up key for nighttime deep sleep
+- `GPIO4` also serves as the manual wake key for battery deep sleep
 - A `Force Sync` button is also exposed
-- Pressing `GPIO4` during nighttime deep sleep bypasses quiet hours once, forces one refresh, and then returns to deep sleep until `10:00`
+- Pressing `GPIO4` during battery deep sleep forces one synchronization, then returns to the appropriate sleep schedule
 - Three runtime states are supported: "plugged high-frequency / battery power-saving / battery nighttime silent"
 - Wi-Fi uses `fast_connect: true` and `power_save_mode: HIGH`, with automatic fallback AP startup disabled to reduce battery-mode network power use
+- The fixed `5s` post-connect delay is removed, and a `60s` awake watchdog returns the device to deep sleep after Wi-Fi or API failures
 - HTTP request timeout is reduced from `20s` to `10s`, so network failures keep the device awake for less time
 
 ESPHome `secrets.yaml` requires at least these values:
@@ -85,17 +86,20 @@ You can also copy directly from [deploy/esphome/secrets.example.yaml](../../depl
 
 ### Power-Saving Polling Strategy
 
-The current API template includes a conservative power-saving strategy:
+The current API template uses a scheduled wake strategy:
 
 - Plugged mode: poll every `2min`
-- Battery mode: poll every `15min`
-- Battery voltage/level sampling: update every `2min`
+- Battery mode: wake every `30min`, fetch data, refresh only when needed, then immediately return to deep sleep
+- Low-battery mode: automatically extend the wake interval to `2h`
+- Battery voltage/level sampling: once per wake; every `2min` while plugged and continuously online
 - Power Profile state: update every `5min`
 - Battery nighttime silent: from `22:00` to `10:00` the next day, no routine API requests — the device enters deep sleep, auto-wakes at `10:00`, or wakes on `GPIO4` for one manual refresh
 - E-paper refresh retains the "only refresh when payload changes" logic, so plugged mode polls more frequently but does not cause repeated screen refreshes for identical content
+- Only a compact fingerprint of render-relevant payload fields and the partial-refresh counter are persisted; an unchanged payload does not redraw after a deep-sleep reboot
+- `GPIO21` is enabled only for the short battery sampling window and is turned off immediately afterward
 - If battery level drops below threshold, the top status bar displays a `Low Battery` indicator
 
-This version still keeps daytime OTA/API available; it does not change battery mode into "fetch once, then immediately deep sleep." If measured battery life is still not enough, switch to the more aggressive daytime periodic wake strategy next.
+In battery mode, API/OTA is available only during the short wake window, and a successful sync is followed by immediate sleep. Before OTA, connect USB power and confirm the device enters the plugged high-frequency profile. The `60s` value is only a maximum awake fallback for network failures, not a fixed OTA window.
 
 The template also exposes these entities:
 
@@ -123,11 +127,13 @@ If in practice you observe:
 - The device still shows "plugged" briefly after unplugging at full charge
 - Or switching is slow when charging with voltage below threshold
 
-You can adjust the substitutions at the top of [reterminal_e1001_infohub_api.yaml](../../deploy/esphome/reterminal_e1001_infohub_api.yaml):
+You can adjust these substitutions at the top of [reterminal_e1001_infohub_api.yaml](../../deploy/esphome/reterminal_e1001_infohub_api.yaml):
 
 - `plugged_voltage_threshold`
 - `battery_voltage_threshold`
 - `low_battery_level_threshold`
+- `battery_wake_interval_minutes`
+- `low_battery_wake_interval_minutes`
 
 ### Verified Configuration Notes
 
@@ -168,12 +174,11 @@ To further verify hardware partial refresh, do not switch display models directl
 
 ## 5. Further Power Saving
 
-The current version already includes "no requests at night + nighttime deep sleep" in the template. To further extend battery life:
+The current version includes all-day scheduled battery wake and nighttime deep sleep. To extend battery life further:
 
-- Switch daytime battery mode to "wake on schedule, request once, then deep sleep again" — this saves significantly more power than maintaining a Wi-Fi connection
 - If a reliable USB/VBUS detection pin is identified later, replace the current voltage-based approximation with true external power detection for faster switching
-- If the backend collection doesn't change at minute-level frequency, extend `battery_poll_interval` from `15min` to `30min`, `60min`, or longer
-- If only screen content preservation is needed at night without network connectivity, consider disabling Wi-Fi before entering silent mode or entering deep sleep earlier
+- If backend data changes infrequently, change `battery_wake_interval_minutes` from `30` to `60` or longer
+- Measure wake duration and deep-sleep current with a power profiler; if sleep current remains high, inspect the onboard regulator and peripheral power rails
 
 ## References
 

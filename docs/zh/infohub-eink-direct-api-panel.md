@@ -59,11 +59,12 @@ curl "http://10.30.5.172:8080/dashboard/eink/device.json?token=YOUR_DASHBOARD_TO
 - `update_interval: never`，显示器不做固定周期刷新
 - 只要 HTTP 返回 body 和上次完全一致，就不触发 `component.update`
 - `GPIO3` 保留为实体手动刷新按钮
-- `GPIO4` 同时作为夜间 deep sleep 的唤醒键
+- `GPIO4` 同时作为电池 deep sleep 的手动唤醒键
 - 还额外暴露了一个 `Force Sync` 按钮
-- 夜间 deep sleep 中按下 `GPIO4` 唤醒后，会绕过一次夜间静默、强制刷新一次，然后重新睡到 `10:00`
+- 电池 deep sleep 中按下 `GPIO4` 唤醒后，会强制同步一次，然后重新进入对应时段的 deep sleep
 - 新增了“插电高实时 / 电池省电 / 电池夜间静默”三种运行状态
 - Wi-Fi 使用 `fast_connect: true` 和 `power_save_mode: HIGH`，并关闭 fallback AP 自动启动，用于减少电池模式下的联网耗电
+- 联网后不再固定等待 `5s`，Wi-Fi 或接口异常时由 `60s` 清醒超时兜底进入 deep sleep
 - HTTP 请求超时从 `20s` 降到 `10s`，网络异常时少醒着等待
 
 ESPHome 的 `secrets.yaml` 至少要补这些值：
@@ -85,17 +86,20 @@ infohub_eink_device_url: "http://10.30.5.172:8080/dashboard/eink/device.json?tok
 
 ### 省电版轮询策略
 
-当前仓库里的 API 模板已经内置一套偏稳妥的省电策略：
+当前仓库里的 API 模板使用周期唤醒策略：
 
 - 插电模式：每 `2min` 请求一次
-- 电池模式：每 `15min` 请求一次
-- 电池电压/电量采样：每 `2min` 更新一次
+- 电池模式：每 `30min` 唤醒，请求和必要的屏幕刷新完成后立即 deep sleep
+- 低电量模式：唤醒间隔自动延长到 `2h`
+- 电池电压/电量采样：每次唤醒采样一次；插电常驻时每 `2min` 采样一次
 - Power Profile 状态：每 `5min` 更新一次
 - 电池夜间静默：`22:00` 到次日 `10:00` 不请求业务接口，并直接进入 deep sleep；等到 `10:00` 自动唤醒，或按 `GPIO4` 手动唤醒并刷新一次
 - 电子纸刷新仍然保留“只有 payload 变化才刷新”的逻辑，所以插电模式虽然请求更频繁，但不会因为同一份内容反复刷屏
+- 固件只持久化会影响画面的 payload 指纹和局刷计数；deep sleep 重启后如果业务内容未变化，不会重复刷屏
+- `GPIO21` 只在电池采样的短时间内开启，采样完成后立即关闭
 - 如果电量低于阈值，顶部状态栏会额外显示 `低电量` 标识
 
-这版仍保留白天 OTA/API 可用，没有把白天电池模式改成“拉取后立即 deep sleep”。如果实测续航仍不够，再切到更激进的白天周期唤醒方案。
+电池模式下 API/OTA 只在每次唤醒后的短窗口可用，而且成功同步后会立即休眠。需要 OTA 时，应先接入 USB 电源并确认设备进入“插电高实时”状态；`60s` 只是网络异常时的最长清醒兜底，不是固定的 OTA 窗口。
 
 另外，模板还会额外暴露这些实体：
 
@@ -123,11 +127,13 @@ infohub_eink_device_url: "http://10.30.5.172:8080/dashboard/eink/device.json?tok
 - 满电拔电后一小段时间里仍被判成“插电”
 - 或者边充边用但电压还没抬到阈值时，切换不够快
 
-可以直接微调 [reterminal_e1001_infohub_api.yaml](../../deploy/esphome/reterminal_e1001_infohub_api.yaml) 顶部这两个 substitution：
+可以直接微调 [reterminal_e1001_infohub_api.yaml](../../deploy/esphome/reterminal_e1001_infohub_api.yaml) 顶部这些 substitution：
 
 - `plugged_voltage_threshold`
 - `battery_voltage_threshold`
 - `low_battery_level_threshold`
+- `battery_wake_interval_minutes`
+- `low_battery_wake_interval_minutes`
 
 ### 已验证的配置注意事项
 
@@ -168,12 +174,11 @@ infohub_eink_device_url: "http://10.30.5.172:8080/dashboard/eink/device.json?tok
 
 ## 5. 如果还要继续省电
 
-当前这版已经把“夜间不请求 + 夜间 deep sleep”做进模板了。如果你后面还想继续压榨续航，可以继续往下做：
+当前这版已经把全天电池周期唤醒和夜间 deep sleep 做进模板了。如果还要继续压榨续航，可以继续往下做：
 
-- 把白天电池模式也改成“定时唤醒后请求一次，再次 deep sleep”，省电幅度会比常驻 Wi‑Fi 再大一截
 - 如果后面确认到稳定可用的 USB/VBUS 检测脚位，可以把现在的电压近似判断改成真正的外部供电检测，切换会更准
-- 如果你确定后端采集本身不是分钟级变化，可以把 `battery_poll_interval` 从 `15min` 再拉长到 `30min`、`60min` 或更长
-- 如果夜间只需要保留画面、不需要联机，可以进一步评估在进入静默前主动关 Wi‑Fi 或更早进入 deep sleep
+- 如果后端数据变化不频繁，可以把 `battery_wake_interval_minutes` 从 `30` 调到 `60` 或更长
+- 通过功耗仪测量每次唤醒耗时与 deep sleep 静态电流；如果深睡电流仍明显偏高，再排查板载稳压器和其他外设电源轨
 
 ## 参考资料
 

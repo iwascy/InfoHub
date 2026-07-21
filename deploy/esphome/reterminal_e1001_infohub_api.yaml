@@ -8,7 +8,9 @@ substitutions:
   device_name: reterminal-e1001-infohub
   friendly_name: reTerminal E1001 InfoHub
   plugged_poll_interval: 2min
-  battery_poll_interval: 15min
+  battery_wake_interval_minutes: "30"
+  low_battery_wake_interval_minutes: "120"
+  battery_awake_timeout: 60s
   battery_sensor_update_interval: 2min
   power_profile_update_interval: 5min
   full_payload_sync_every: "6"
@@ -34,10 +36,15 @@ esphome:
               id(manual_wake_refresh_requested) = true;
               id(force_full_refresh_requested) = true;
               ESP_LOGI("power_profile", "manual wake detected, forcing one refresh");
+            } else if (wakeup_cause != ESP_SLEEP_WAKEUP_TIMER) {
+              // A cold boot, OTA reboot, or reset may be running a new layout.
+              id(force_full_refresh_requested) = true;
             }
         - delay: 200ms
         - component.update: battery_voltage
         - component.update: battery_level
+        - output.turn_off: bsp_battery_enable
+        - script.execute: battery_awake_watchdog
 
 esp32:
   board: esp32-s3-devkitc-1
@@ -71,7 +78,6 @@ wifi:
   #   subnet: !secret wifi_subnet
   on_connect:
     then:
-      - delay: 5s
       - script.execute: run_power_aware_refresh
   ap:
     ssid: "InfoHub Fallback"
@@ -153,7 +159,7 @@ globals:
     initial_value: 'false'
   - id: low_battery_active
     type: bool
-    restore_value: no
+    restore_value: yes
     initial_value: 'false'
   - id: low_battery_display_refresh_pending
     type: bool
@@ -189,8 +195,16 @@ globals:
     initial_value: 'false'
   - id: partial_refresh_counter
     type: int
-    restore_value: no
+    restore_value: yes
     initial_value: '0'
+  - id: payload_fingerprint
+    type: uint32_t
+    restore_value: yes
+    initial_value: '0'
+  - id: payload_fingerprint_ready
+    type: bool
+    restore_value: yes
+    initial_value: 'false'
   - id: claude_value_live
     type: std::string
     restore_value: no
@@ -245,7 +259,7 @@ sensor:
     pin: GPIO1
     name: "${friendly_name} Battery Voltage"
     id: battery_voltage
-    update_interval: ${battery_sensor_update_interval}
+    update_interval: never
     attenuation: 12db
     accuracy_decimals: 2
     filters:
@@ -290,7 +304,7 @@ sensor:
     accuracy_decimals: 0
     lambda: |-
       return id(battery_voltage).state;
-    update_interval: ${battery_sensor_update_interval}
+    update_interval: never
     filters:
       - calibrate_linear:
           - 4.15 -> 100.0
@@ -318,6 +332,9 @@ sensor:
             id(low_battery_active) = next_low_battery;
             id(low_battery_display_refresh_pending) =
               changed && (!id(last_payload_body).empty() || !id(last_error_text).empty());
+            if (changed && id(last_payload_body).empty()) {
+              id(force_full_refresh_requested) = true;
+            }
         - if:
             condition:
               lambda: return id(low_battery_display_refresh_pending);
@@ -351,9 +368,6 @@ time:
   - platform: sntp
     id: sntp_clock
     timezone: ${time_zone}
-    on_time_sync:
-      then:
-        - script.execute: run_power_aware_refresh
     on_time:
       - hours: ${battery_quiet_start_hour}
         minutes: 0
@@ -388,8 +402,69 @@ spi:
   mosi_pin: GPIO9
 
 script:
-  - id: run_power_aware_refresh
+  - id: sample_battery
     mode: restart
+    then:
+      - output.turn_on: bsp_battery_enable
+      - delay: 200ms
+      - component.update: battery_voltage
+      - component.update: battery_level
+      - output.turn_off: bsp_battery_enable
+
+  - id: enter_battery_sleep
+    mode: restart
+    then:
+      - if:
+          condition:
+            lambda: return id(battery_sample_ready) && !id(external_power_connected);
+          then:
+            - output.turn_off: bsp_battery_enable
+            - lambda: id(manual_wake_refresh_requested) = false;
+            - if:
+                condition:
+                  lambda: |-
+                    auto now = id(sntp_clock).now();
+                    return now.is_valid() &&
+                      (now.hour >= ${battery_quiet_start_hour} ||
+                       now.hour < ${battery_quiet_end_hour});
+                then:
+                  - logger.log: "battery quiet hours active, sleeping until 10:00"
+                  - deep_sleep.enter:
+                      id: quiet_hours_sleep
+                      until: "10:00:00"
+                      time_id: sntp_clock
+                else:
+                  - if:
+                      condition:
+                        lambda: return id(low_battery_active);
+                      then:
+                        - logger.log: "low battery cycle finished, entering extended deep sleep"
+                        - lambda: |-
+                            id(quiet_hours_sleep).set_sleep_duration(
+                              ${low_battery_wake_interval_minutes}UL * 60UL * 1000UL
+                            );
+                        - deep_sleep.enter: quiet_hours_sleep
+                      else:
+                        - logger.log: "battery cycle finished, entering deep sleep"
+                        - lambda: |-
+                            id(quiet_hours_sleep).set_sleep_duration(
+                              ${battery_wake_interval_minutes}UL * 60UL * 1000UL
+                            );
+                        - deep_sleep.enter: quiet_hours_sleep
+
+  - id: battery_awake_watchdog
+    mode: restart
+    then:
+      - delay: ${battery_awake_timeout}
+      - if:
+          condition:
+            lambda: return id(battery_sample_ready) && !id(external_power_connected);
+          then:
+            - logger.log: "battery awake timeout reached, forcing deep sleep"
+            - script.execute: enter_battery_sleep
+
+  - id: run_power_aware_refresh
+    mode: single
     then:
       - if:
           condition:
@@ -408,7 +483,9 @@ script:
 
               auto now = id(sntp_clock).now();
               if (!now.is_valid()) {
-                return false;
+                // A cold boot may connect before SNTP. Fetch once; the sleep
+                // decision will use wall-clock time if it becomes available.
+                return true;
               }
 
               return now.hour < ${battery_quiet_end_hour} ||
@@ -430,14 +507,10 @@ script:
                       (now.hour >= ${battery_quiet_start_hour} ||
                        now.hour < ${battery_quiet_end_hour});
                 then:
-                  - logger.log: "battery quiet hours active, entering deep sleep until 10:00"
-                  - deep_sleep.enter:
-                      id: quiet_hours_sleep
-                      until: "10:00:00"
-                      time_id: sntp_clock
+                  - script.execute: enter_battery_sleep
 
   - id: fetch_dashboard_payload
-    mode: restart
+    mode: single
     then:
       - http_request.get:
           url: !secret infohub_eink_device_url
@@ -477,6 +550,15 @@ script:
                   std::string next_total_cost = "--";
                   int next_total_requests = 0;
                   int next_total_alerts = 0;
+                  bool had_runtime_payload = !id(last_payload_body).empty();
+                  uint32_t next_payload_fingerprint = 2166136261U;
+
+                  auto extend_fingerprint = [&](const char *data, size_t length) {
+                    for (size_t index = 0; index < length; index++) {
+                      next_payload_fingerprint ^= static_cast<uint8_t>(data[index]);
+                      next_payload_fingerprint *= 16777619U;
+                    }
+                  };
 
                   bool parsed = json::parse_json(body, [&](JsonObject root) -> bool {
                     JsonObject claude_obj = root["claude"];
@@ -502,6 +584,22 @@ script:
                     next_total_cost = total_cost != nullptr ? total_cost : "--";
                     next_total_requests = total_obj["requests"] | 0;
                     next_total_alerts = total_obj["alerts"] | 0;
+
+                    // Exclude updated_at fields: collection timestamps alone should
+                    // not wake the panel. Hash every value that affects rendering.
+                    const char *semantic_keys[] = {
+                      "refresh_seconds", "claude", "codex", "total",
+                      "claude_rows", "codex_rows", "alerts", "reset_hints"
+                    };
+                    for (const char *key : semantic_keys) {
+                      std::string serialized_value;
+                      JsonVariant value = root[key];
+                      serializeJson(value, serialized_value);
+                      extend_fingerprint(key, strlen(key));
+                      extend_fingerprint(serialized_value.data(), serialized_value.size());
+                    }
+                    const char battery_state = id(low_battery_active) ? '1' : '0';
+                    extend_fingerprint(&battery_state, 1);
                     return true;
                   });
 
@@ -571,10 +669,29 @@ script:
                     metrics_changed = true;
                   }
 
-                  bool needs_full_payload_sync = id(force_full_refresh_requested) || id(last_payload_body).empty();
-                  bool body_changed = id(last_payload_body) != body;
+                  // Live metric globals reset on every deep-sleep wake. The compact
+                  // semantic fingerprint is persisted so an unchanged payload does
+                  // not cause a redundant E-Ink refresh after reboot.
+                  if (!had_runtime_payload) {
+                    metrics_changed = false;
+                  }
 
-                  if (body_changed && !needs_full_payload_sync) {
+                  bool semantic_changed =
+                    !id(payload_fingerprint_ready) ||
+                    id(payload_fingerprint) != next_payload_fingerprint;
+                  bool needs_full_payload_sync =
+                    id(force_full_refresh_requested) ||
+                    (!had_runtime_payload && semantic_changed);
+                  bool body_changed = !had_runtime_payload || id(last_payload_body) != body;
+
+                  if (!had_runtime_payload) {
+                    // Keep the current body in RAM for a possible redraw during this
+                    // wake cycle; only the fingerprint crosses deep sleep.
+                    id(last_payload_body) = body;
+                    id(staged_payload_body).clear();
+                  }
+
+                  if (had_runtime_payload && body_changed && !needs_full_payload_sync) {
                     id(staged_payload_body) = body;
                   }
 
@@ -591,6 +708,11 @@ script:
                     id(last_payload_body) = body;
                     id(staged_payload_body).clear();
                     id(partial_refresh_counter) = 0;
+                    // Commit the fingerprint only with a full-frame payload.
+                    // Partial updates intentionally leave it pointing at the
+                    // last complete frame so the next deep-sleep wake can catch up.
+                    id(payload_fingerprint) = next_payload_fingerprint;
+                    id(payload_fingerprint_ready) = true;
                     should_refresh = true;
                   }
 
@@ -623,27 +745,8 @@ script:
                   then:
                     - component.update: epaper_display
                     - lambda: id(pending_display_refresh) = false;
-      - if:
-          condition:
-            lambda: |-
-              if (!id(manual_wake_refresh_requested) || id(external_power_connected)) {
-                return false;
-              }
-
-              auto now = id(sntp_clock).now();
-              return now.is_valid() &&
-                (now.hour >= ${battery_quiet_start_hour} ||
-                 now.hour < ${battery_quiet_end_hour});
-          then:
-            - logger.log: "manual night wake refresh finished, returning to deep sleep"
-            - lambda: id(manual_wake_refresh_requested) = false;
-            - delay: 10s
-            - deep_sleep.enter:
-                id: quiet_hours_sleep
-                until: "10:00:00"
-                time_id: sntp_clock
-          else:
-            - lambda: id(manual_wake_refresh_requested) = false;
+      - lambda: id(manual_wake_refresh_requested) = false;
+      - script.execute: enter_battery_sleep
 
 interval:
   - interval: ${plugged_poll_interval}
@@ -654,13 +757,13 @@ interval:
           then:
             - script.execute: run_power_aware_refresh
 
-  - interval: ${battery_poll_interval}
+  - interval: ${battery_sensor_update_interval}
     then:
       - if:
           condition:
-            lambda: return id(battery_sample_ready) && !id(external_power_connected);
+            lambda: return id(battery_sample_ready) && id(external_power_connected);
           then:
-            - script.execute: run_power_aware_refresh
+            - script.execute: sample_battery
 
 button:
   - platform: template
@@ -1242,6 +1345,12 @@ display:
           reset_codex = reset_codex_text != nullptr ? reset_codex_text : "--";
           return true;
         });
+      }
+
+      if (parsed && id(battery_sample_ready) && !id(external_power_connected)) {
+        refresh_seconds = id(low_battery_active)
+          ? ${low_battery_wake_interval_minutes} * 60
+          : ${battery_wake_interval_minutes} * 60;
       }
 
       std::string status_text = "首次拉取";
