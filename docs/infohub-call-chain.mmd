@@ -55,9 +55,9 @@ sequenceDiagram
 
         Backend->>Backend: Read snapshots from Store
 
-        Note over Backend: buildEInkDevicePayload()<br/>Aggregate claude_relay + sub2api
+        Note over Backend: buildEInkDevicePayload()<br/>Split sub2api DeepSeek + Codex usage
 
-        Backend-->>Device: JSON Response<br/>{claude, codex, total, refreshSeconds}
+        Backend-->>Device: JSON Response<br/>{deepseek, codex, total, refreshSeconds}
 
         Note over Device: Render on e-ink display
     end

@@ -126,9 +126,9 @@
   <text x="399.0055" y="1095" font-size="11" text-anchor="start" font-weight="400" fill="var(--_text-muted)" dy="3.8499999999999996">Read snapshots from Store</text>
 </g>
 <g class="message" data-from="Backend" data-to="Device" data-label="JSON Response
-{claude, codex, total, refreshSeconds}" data-line-style="dashed" data-arrow-head="filled" data-self="false">
+{deepseek, codex, total, refreshSeconds}" data-line-style="dashed" data-arrow-head="filled" data-self="false">
   <line x1="361.0055" y1="1170" x2="134.40949999999998" y2="1170" stroke="var(--_line)" stroke-width="1" stroke-dasharray="6 4" marker-end="url(#seq-arrow)" />
-  <text x="247.70749999999998" y="1160" font-size="11" text-anchor="middle" font-weight="400" fill="var(--_text-muted)"><tspan x="247.70749999999998" dy="-3.3000000000000007">JSON Response</tspan><tspan x="247.70749999999998" dy="14.3">{claude, codex, total, refreshSeconds}</tspan></text>
+  <text x="247.70749999999998" y="1160" font-size="11" text-anchor="middle" font-weight="400" fill="var(--_text-muted)"><tspan x="247.70749999999998" dy="-3.3000000000000007">JSON Response</tspan><tspan x="247.70749999999998" dy="14.3">{deepseek, codex, total, refreshSeconds}</tspan></text>
 </g>
 <g class="note" data-position="over" data-actors="Backend">
   <polygon points="216.31250000000003,396 499.69849999999997,396 505.69849999999997,402 505.69849999999997,419 216.31250000000003,419" fill="var(--bg)" stroke="var(--_node-stroke)" stroke-width="0.75" />
@@ -146,9 +146,9 @@
   <text x="247.70749999999998" y="911.5" font-size="11" text-anchor="middle" font-weight="400" fill="var(--_text-muted)" dy="3.8499999999999996">On-Demand Device Request</text>
 </g>
 <g class="note" data-position="over" data-actors="Backend">
-  <polygon points="202.94750000000002,1123 513.0635,1123 519.0635,1129 519.0635,1146 202.94750000000002,1146" fill="var(--bg)" stroke="var(--_node-stroke)" stroke-width="0.75" />
-  <polygon points="513.0635,1123 519.0635,1129 513.0635,1129" fill="var(--_inner-stroke)" stroke="var(--_node-stroke)" stroke-width="0.75" />
-  <text x="361.0055" y="1134.5" font-size="11" text-anchor="middle" font-weight="400" fill="var(--_text-muted)"><tspan x="361.0055" dy="-3.3000000000000007">buildEInkDevicePayload()</tspan><tspan x="361.0055" dy="14.3">Aggregate claude_relay + sub2api</tspan></text>
+  <polygon points="192.2555,1123 523.7555,1123 529.7555,1129 529.7555,1146 192.2555,1146" fill="var(--bg)" stroke="var(--_node-stroke)" stroke-width="0.75" />
+  <polygon points="523.7555,1123 529.7555,1129 523.7555,1129" fill="var(--_inner-stroke)" stroke="var(--_node-stroke)" stroke-width="0.75" />
+  <text x="361.0055" y="1134.5" font-size="11" text-anchor="middle" font-weight="400" fill="var(--_text-muted)"><tspan x="361.0055" dy="-3.3000000000000007">buildEInkDevicePayload()</tspan><tspan x="361.0055" dy="14.3">Split sub2api DeepSeek + Codex usage</tspan></text>
 </g>
 <g class="note" data-position="over" data-actors="Device">
   <polygon points="66.34249999999997,1178 196.4765,1178 202.4765,1184 202.4765,1201 66.34249999999997,1201" fill="var(--bg)" stroke="var(--_node-stroke)" stroke-width="0.75" />

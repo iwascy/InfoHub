@@ -33,9 +33,25 @@ type sub2apiUserStat struct {
 	UserID   string
 	UserName string
 	Email    string
+	Balance  *float64
 	Tokens   float64
 	Requests float64
 	Cost     float64
+	Products map[string]sub2apiProductStat
+	Quotas   []sub2apiPlatformQuota
+}
+
+type sub2apiProductStat struct {
+	Tokens   float64
+	Requests float64
+	Cost     float64
+}
+
+type sub2apiPlatformQuota struct {
+	Window  string
+	Usage   float64
+	Limit   float64
+	ResetAt string
 }
 
 func NewSub2APICollector(cfg config.HTTPCollectorConfig, logger *slog.Logger) *Sub2APICollector {
@@ -97,14 +113,24 @@ func (c *Sub2APICollector) Collect(ctx context.Context) ([]model.DataItem, error
 		totalRequests += userStat.Requests
 		totalCost += userStat.Cost
 		items = append(items, sub2apiUserTokenItem(c.Name(), userStat))
+		for product, productStat := range userStat.Products {
+			items = append(items, sub2apiProductTokenItem(c.Name(), userStat, product, productStat))
+		}
+		items = append(items, sub2apiDeepSeekQuotaItems(c.Name(), userStat)...)
 	}
 
 	for _, account := range selectedAccounts {
 		names = append(names, account.Name)
 		if stats, ok := statsByAccount[account.ID]; ok {
-			totalTokens += floatPath(stats, "tokens")
-			totalRequests += floatPath(stats, "requests")
-			totalCost += floatPath(stats, "cost")
+			stat := sub2apiProductStat{
+				Tokens:   floatPath(stats, "tokens"),
+				Requests: floatPath(stats, "requests"),
+				Cost:     floatPath(stats, "cost"),
+			}
+			totalTokens += stat.Tokens
+			totalRequests += stat.Requests
+			totalCost += stat.Cost
+			items = append(items, sub2apiAccountProductTokenItem(c.Name(), account, "codex", stat))
 		}
 
 		items = append(items,
@@ -334,14 +360,158 @@ func (c *Sub2APICollector) fetchUserTodayStats(ctx context.Context, session *ser
 		return sub2apiUserStat{}, fmt.Errorf("fetch sub2api user usage stats: %w", err)
 	}
 
-	return sub2apiUserStat{
+	stat := sub2apiUserStat{
 		UserID:   userID,
 		UserName: name,
 		Email:    email,
 		Tokens:   firstPathFloat(payload, "data.total_tokens", "total_tokens"),
 		Requests: firstPathFloat(payload, "data.total_requests", "total_requests"),
 		Cost:     firstPathFloat(payload, "data.total_actual_cost", "data.total_cost", "total_actual_cost", "total_cost"),
-	}, nil
+		Products: sub2apiProductStats(payload),
+	}
+
+	if c.service.hasEndpoint("user_platform_quotas") {
+		stat.Quotas, err = c.fetchUserPlatformQuotas(ctx, session, userID)
+		if err != nil {
+			return sub2apiUserStat{}, err
+		}
+	}
+	if len(stat.Quotas) == 0 && c.service.hasEndpoint("user_detail") {
+		stat.Balance, err = c.fetchUserBalance(ctx, session, userID)
+		if err != nil {
+			return sub2apiUserStat{}, err
+		}
+	}
+
+	return stat, nil
+}
+
+func (c *Sub2APICollector) fetchUserPlatformQuotas(ctx context.Context, session *serviceSession, userID string) ([]sub2apiPlatformQuota, error) {
+	payload, err := fetchSub2APIUserJSON(ctx, session, "user_platform_quotas", userID)
+	if err != nil {
+		return nil, fmt.Errorf("fetch sub2api user platform quotas: %w", err)
+	}
+
+	rawQuotas, ok := nestedValue(payload, "data.platform_quotas")
+	if !ok {
+		rawQuotas, ok = nestedValue(payload, "platform_quotas")
+	}
+	if !ok {
+		return nil, fmt.Errorf("sub2api platform quotas payload missing platform_quotas")
+	}
+	quotaList, ok := rawQuotas.([]any)
+	if !ok {
+		return nil, fmt.Errorf("sub2api platform quotas is not an array")
+	}
+
+	for _, rawQuota := range quotaList {
+		quota, ok := rawQuota.(map[string]any)
+		if !ok || !strings.EqualFold(firstString(quota, "platform"), "anthropic") {
+			continue
+		}
+		windows := []struct {
+			name      string
+			usagePath string
+			limitPath string
+			resetPath string
+		}{
+			{name: "daily", usagePath: "daily_usage_usd", limitPath: "daily_limit_usd", resetPath: "daily_window_resets_at"},
+			{name: "weekly", usagePath: "weekly_usage_usd", limitPath: "weekly_limit_usd", resetPath: "weekly_window_resets_at"},
+			{name: "monthly", usagePath: "monthly_usage_usd", limitPath: "monthly_limit_usd", resetPath: "monthly_window_resets_at"},
+		}
+		result := make([]sub2apiPlatformQuota, 0, len(windows))
+		for _, window := range windows {
+			limit, configured := nestedFloat(quota, window.limitPath)
+			if !configured {
+				continue
+			}
+			result = append(result, sub2apiPlatformQuota{
+				Window:  window.name,
+				Usage:   floatPath(quota, window.usagePath),
+				Limit:   limit,
+				ResetAt: firstString(quota, window.resetPath),
+			})
+		}
+		return result, nil
+	}
+	return nil, nil
+}
+
+func (c *Sub2APICollector) fetchUserBalance(ctx context.Context, session *serviceSession, userID string) (*float64, error) {
+	payload, err := fetchSub2APIUserJSON(ctx, session, "user_detail", userID)
+	if err != nil {
+		return nil, fmt.Errorf("fetch sub2api user detail: %w", err)
+	}
+	balance, ok := nestedFloat(payload, "data.balance")
+	if !ok {
+		balance, ok = nestedFloat(payload, "balance")
+	}
+	if !ok {
+		return nil, nil
+	}
+	return &balance, nil
+}
+
+func fetchSub2APIUserJSON(ctx context.Context, session *serviceSession, endpointKey, userID string) (any, error) {
+	endpoint, ok := session.endpoints[endpointKey]
+	if !ok || !strings.Contains(endpoint, "{id}") {
+		return nil, fmt.Errorf("sub2api endpoint %q must contain {id}", endpointKey)
+	}
+	const resolvedKey = "resolved_user_endpoint"
+	previous, hadPrevious := session.endpoints[resolvedKey]
+	session.endpoints[resolvedKey] = strings.ReplaceAll(endpoint, "{id}", url.PathEscape(userID))
+	defer func() {
+		if hadPrevious {
+			session.endpoints[resolvedKey] = previous
+		} else {
+			delete(session.endpoints, resolvedKey)
+		}
+	}()
+	return session.fetchJSON(ctx, http.MethodGet, resolvedKey, nil, nil)
+}
+
+func sub2apiProductStats(payload any) map[string]sub2apiProductStat {
+	stats := map[string]sub2apiProductStat{}
+	rawEndpoints, ok := nestedValue(payload, "data.upstream_endpoints")
+	if !ok {
+		rawEndpoints, ok = nestedValue(payload, "upstream_endpoints")
+	}
+	if !ok {
+		return stats
+	}
+
+	endpoints, ok := rawEndpoints.([]any)
+	if !ok {
+		return stats
+	}
+	for _, rawEndpoint := range endpoints {
+		endpoint, ok := rawEndpoint.(map[string]any)
+		if !ok {
+			continue
+		}
+		product := sub2apiProductForUpstream(firstString(endpoint, "endpoint"))
+		if product == "" {
+			continue
+		}
+		stat := stats[product]
+		stat.Tokens += firstPathFloat(endpoint, "total_tokens", "tokens")
+		stat.Requests += firstPathFloat(endpoint, "requests", "total_requests")
+		stat.Cost += firstPathFloat(endpoint, "actual_cost", "cost")
+		stats[product] = stat
+	}
+	return stats
+}
+
+func sub2apiProductForUpstream(endpoint string) string {
+	endpoint = strings.ToLower(strings.TrimSpace(endpoint))
+	switch {
+	case strings.Contains(endpoint, "/messages"):
+		return "deepseek"
+	case strings.Contains(endpoint, "/responses"):
+		return "codex"
+	default:
+		return ""
+	}
 }
 
 func (c *Sub2APICollector) resolveUser(ctx context.Context, session *serviceSession, keyword string) (string, string, error) {
@@ -459,6 +629,110 @@ func sub2apiUserTokenItem(source string, stat sub2apiUserStat) model.DataItem {
 			"daily_cost":     stat.Cost,
 		},
 		FetchedAt: 0,
+	}
+}
+
+func sub2apiProductTokenItem(source string, user sub2apiUserStat, product string, stat sub2apiProductStat) model.DataItem {
+	return model.DataItem{
+		Source:   source,
+		Category: "token_usage_product",
+		Title:    fmt.Sprintf("%s 今日 Token 用量", sub2apiProductDisplayName(product)),
+		Value:    formatFloat(stat.Tokens),
+		Extra: map[string]any{
+			"scope":          "product",
+			"product":        product,
+			"user_id":        user.UserID,
+			"daily_requests": stat.Requests,
+			"daily_cost":     stat.Cost,
+		},
+		FetchedAt: 0,
+	}
+}
+
+func sub2apiDeepSeekQuotaItems(source string, stat sub2apiUserStat) []model.DataItem {
+	items := make([]model.DataItem, 0, len(stat.Quotas)+1)
+	for _, quota := range stat.Quotas {
+		remaining := quota.Limit - quota.Usage
+		if remaining < 0 {
+			remaining = 0
+		}
+		remainingPct := 0.0
+		if quota.Limit > 0 {
+			remainingPct = remaining / quota.Limit * 100
+		}
+		extra := map[string]any{
+			"scope":             "product",
+			"product":           "deepseek",
+			"platform":          "anthropic",
+			"user_id":           stat.UserID,
+			"window":            quota.Window,
+			"usage_usd":         quota.Usage,
+			"limit_usd":         quota.Limit,
+			"remaining_usd":     remaining,
+			"remaining_percent": remainingPct,
+			"quota_source":      "platform_quota",
+		}
+		if quota.ResetAt != "" {
+			extra["reset_at"] = quota.ResetAt
+		}
+		items = append(items, model.DataItem{
+			Source: source, Category: "product_quota",
+			Title: fmt.Sprintf("DeepSeek %s额度", sub2apiQuotaWindowDisplayName(quota.Window)),
+			Value: fmt.Sprintf("$%.2f", remaining), Extra: extra,
+		})
+	}
+	if len(items) == 0 && stat.Balance != nil {
+		items = append(items, model.DataItem{
+			Source: source, Category: "product_quota", Title: "DeepSeek 账户余额",
+			Value: fmt.Sprintf("$%.2f", *stat.Balance),
+			Extra: map[string]any{
+				"scope": "product", "product": "deepseek", "user_id": stat.UserID,
+				"window": "balance", "remaining_usd": *stat.Balance, "quota_source": "user_balance",
+			},
+		})
+	}
+	return items
+}
+
+func sub2apiQuotaWindowDisplayName(window string) string {
+	switch window {
+	case "daily":
+		return "日"
+	case "weekly":
+		return "周"
+	case "monthly":
+		return "月"
+	default:
+		return window + " "
+	}
+}
+
+func sub2apiAccountProductTokenItem(source string, account sub2apiAccountQuota, product string, stat sub2apiProductStat) model.DataItem {
+	return model.DataItem{
+		Source:   source,
+		Category: "token_usage_product",
+		Title:    fmt.Sprintf("%s 今日 Token 用量", sub2apiProductDisplayName(product)),
+		Value:    formatFloat(stat.Tokens),
+		Extra: map[string]any{
+			"scope":          "account",
+			"product":        product,
+			"account_id":     account.ID,
+			"account_name":   account.Name,
+			"daily_requests": stat.Requests,
+			"daily_cost":     stat.Cost,
+		},
+		FetchedAt: 0,
+	}
+}
+
+func sub2apiProductDisplayName(product string) string {
+	switch product {
+	case "deepseek":
+		return "DeepSeek"
+	case "codex":
+		return "Codex"
+	default:
+		return product
 	}
 }
 

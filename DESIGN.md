@@ -53,7 +53,8 @@ deep sleep 会重启 ESP32，固件因此只持久化会影响画面的 payload 
 
 ## 已知限制
 
-- 当前仪表盘主要围绕 Claude 与 Codex 两个展示槽位设计，更多来源需要扩展 dashboard source 配置和布局。
+- 当前仪表盘围绕 sub2api 的 DeepSeek/Codex 产品拆分设计；其他上游端点需要补充明确的产品映射后才会进入主面板。
+- DeepSeek 额度使用 sub2api `anthropic` 平台限额，按日、周、月顺序选择首个已配置周期；三个周期均未设置时只展示用户余额，不计算虚假百分比。
 - 本地 JSONL 格式来自 CLI 工具内部记录，未来工具格式变化时需要更新解析器。
 - Docker 默认配置启用本地采集器，但容器天然看不到宿主机 `~/.claude` 和 `~/.codex`，部署时需要挂载目录或关闭本地采集器。
 - OAuth 在线额度查询依赖上游接口和本机已有凭据；失败时只能展示本地估算或未知状态。
@@ -61,6 +62,7 @@ deep sleep 会重启 ESP32，固件因此只持久化会影响画面的 payload 
 
 ## 变更历史
 
+- 2026-08-13：面板移除 Claude 展示，按 sub2api 上游端点拆分 DeepSeek/Codex 今日消耗，并同时展示 DeepSeek 平台额度/余额与 Codex 额度。
 - 2026-07-21：E1001 电池模式改为全天周期唤醒，加入低电量 2 小时间隔、60 秒清醒超时、跨 deep sleep 的 payload 指纹和按需电池采样。
 - 2026-04-27：补充 README 与设计文档，明确 SQLite 默认存储、鉴权规则、本地 Claude/Codex 采集器和 Docker 注意事项。
 - 2026-04-26：接入 `claude_local` / `codex_local`，新增 SQLite 本地解析状态和事件表，仪表盘支持本地源展示。

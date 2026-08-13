@@ -105,7 +105,7 @@ font:
     size: 54
     glyphsets: &infohub_font_glyphsets
       - GF_Latin_Kernel
-    glyphs: &infohub_font_glyphs '：刷新时间状态等待首次拉取数据解析失败请求成本启用告警总量今日合计余仅正常关注充足最佳耗尽重置暂无同步与系统概览配额显示按键周期点急低电'
+    glyphs: &infohub_font_glyphs '：刷新时间状态等待首次拉取数据解析失败请求成本启用告警总量今日合计余仅正常关注充足最佳耗尽重置暂无同步与系统概览配额显示按键周期点急低电消明细订阅度插高实检测中池夜静默省已账户可未设平台月'
   - file: "gfonts://Noto+Sans+SC@700"
     id: font_header
     size: 24
@@ -205,22 +205,26 @@ globals:
     type: bool
     restore_value: yes
     initial_value: 'false'
-  - id: claude_value_live
+  - id: deepseek_value_live
     type: std::string
     restore_value: no
     initial_value: '"--"'
-  - id: claude_cost_live
+  - id: deepseek_cost_live
     type: std::string
     restore_value: no
     initial_value: '"--"'
-  - id: claude_requests_live
+  - id: deepseek_requests_live
     type: int
     restore_value: no
     initial_value: '0'
-  - id: claude_enabled_live
+  - id: deepseek_enabled_live
     type: int
     restore_value: no
     initial_value: '0'
+  - id: deepseek_quota_signature_live
+    type: std::string
+    restore_value: no
+    initial_value: '""'
   - id: codex_value_live
     type: std::string
     restore_value: no
@@ -536,10 +540,11 @@ script:
                     return;
                   }
 
-                  std::string next_claude_value = "--";
-                  std::string next_claude_cost = "--";
-                  int next_claude_requests = 0;
-                  int next_claude_enabled = 0;
+                  std::string next_deepseek_value = "--";
+                  std::string next_deepseek_cost = "--";
+                  int next_deepseek_requests = 0;
+                  int next_deepseek_enabled = 0;
+                  std::string next_deepseek_quota_signature;
 
                   std::string next_codex_value = "--";
                   std::string next_codex_cost = "--";
@@ -561,13 +566,14 @@ script:
                   };
 
                   bool parsed = json::parse_json(body, [&](JsonObject root) -> bool {
-                    JsonObject claude_obj = root["claude"];
-                    const char *claude_value = claude_obj["value"] | "--";
-                    const char *claude_cost = claude_obj["cost"] | "--";
-                    next_claude_value = claude_value != nullptr ? claude_value : "--";
-                    next_claude_cost = claude_cost != nullptr ? claude_cost : "--";
-                    next_claude_requests = claude_obj["requests"] | 0;
-                    next_claude_enabled = claude_obj["enabled"] | 0;
+                    JsonObject deepseek_obj = root["deepseek"];
+                    const char *deepseek_value = deepseek_obj["value"] | "--";
+                    const char *deepseek_cost = deepseek_obj["cost"] | "--";
+                    next_deepseek_value = deepseek_value != nullptr ? deepseek_value : "--";
+                    next_deepseek_cost = deepseek_cost != nullptr ? deepseek_cost : "--";
+                    next_deepseek_requests = deepseek_obj["requests"] | 0;
+                    next_deepseek_enabled = deepseek_obj["enabled"] | 0;
+                    serializeJson(root["deepseek_quota"], next_deepseek_quota_signature);
 
                     JsonObject codex_obj = root["codex"];
                     const char *codex_value = codex_obj["value"] | "--";
@@ -588,8 +594,8 @@ script:
                     // Exclude updated_at fields: collection timestamps alone should
                     // not wake the panel. Hash every value that affects rendering.
                     const char *semantic_keys[] = {
-                      "refresh_seconds", "claude", "codex", "total",
-                      "claude_rows", "codex_rows", "alerts", "reset_hints"
+                      "refresh_seconds", "deepseek", "deepseek_quota", "codex", "total",
+                      "codex_rows", "alerts", "reset_hints"
                     };
                     for (const char *key : semantic_keys) {
                       std::string serialized_value;
@@ -618,21 +624,26 @@ script:
 
                   bool metrics_changed = false;
 
-                  if (id(claude_value_live) != next_claude_value) {
-                    id(claude_value_live) = next_claude_value;
+                  if (id(deepseek_value_live) != next_deepseek_value) {
+                    id(deepseek_value_live) = next_deepseek_value;
                     metrics_changed = true;
                   }
-                  if (id(claude_cost_live) != next_claude_cost) {
-                    id(claude_cost_live) = next_claude_cost;
+                  if (id(deepseek_cost_live) != next_deepseek_cost) {
+                    id(deepseek_cost_live) = next_deepseek_cost;
                     metrics_changed = true;
                   }
-                  if (id(claude_requests_live) != next_claude_requests) {
-                    id(claude_requests_live) = next_claude_requests;
+                  if (id(deepseek_requests_live) != next_deepseek_requests) {
+                    id(deepseek_requests_live) = next_deepseek_requests;
                     metrics_changed = true;
                   }
-                  if (id(claude_enabled_live) != next_claude_enabled) {
-                    id(claude_enabled_live) = next_claude_enabled;
+                  if (id(deepseek_enabled_live) != next_deepseek_enabled) {
+                    id(deepseek_enabled_live) = next_deepseek_enabled;
                     metrics_changed = true;
+                  }
+                  bool deepseek_quota_changed =
+                    id(deepseek_quota_signature_live) != next_deepseek_quota_signature;
+                  if (deepseek_quota_changed) {
+                    id(deepseek_quota_signature_live) = next_deepseek_quota_signature;
                   }
 
                   if (id(codex_value_live) != next_codex_value) {
@@ -681,6 +692,7 @@ script:
                     id(payload_fingerprint) != next_payload_fingerprint;
                   bool needs_full_payload_sync =
                     id(force_full_refresh_requested) ||
+                    (had_runtime_payload && deepseek_quota_changed) ||
                     (!had_runtime_payload && semantic_changed);
                   bool body_changed = !had_runtime_payload || id(last_payload_body) != body;
 
@@ -1078,20 +1090,24 @@ display:
         std::string status;
       };
 
-      OverviewData claude = {"Claude", "--", 0, "--", 0, -1, 0};
+      struct DeepSeekQuotaData {
+        std::string label;
+        std::string remaining;
+        std::string detail;
+      };
+
+      OverviewData deepseek = {"DeepSeek", "--", 0, "--", 0, -1, 0};
       OverviewData codex = {"Codex", "--", 0, "--", 0, -1, 0};
       OverviewData total = {"合计", "--", 0, "--", 0, -1, 0};
+      DeepSeekQuotaData deepseek_quota = {"额度", "--", "未设置平台额度"};
 
-      RowData claude_rows[2] = {{"--", -1, -1, "--"}, {"--", -1, -1, "--"}};
       RowData codex_rows[2] = {{"--", -1, -1, "--"}, {"--", -1, -1, "--"}};
-      int claude_row_count = 0;
       int codex_row_count = 0;
 
       std::string alert_lines[3] = {"暂无告警", "", ""};
       int alert_count = 0;
 
       std::string updated_at = "--";
-      std::string reset_claude = "--";
       std::string reset_codex = "--";
       int refresh_seconds = 0;
 
@@ -1132,6 +1148,24 @@ display:
 
         it.line(box.x + 12, divider_y, box.x + box.w - 12, divider_y);
         it.printf(box.x + 12, divider_y + 7, id(font_sm), "%s", fit_text_width(id(font_sm), money_text, box.w - 24).c_str());
+        std::string request_text = std::to_string(item.requests) + " 次";
+        it.printf(box.x + box.w - 12, divider_y + 7, id(font_sm), TextAlign::TOP_RIGHT, "%s", request_text.c_str());
+      };
+
+      auto draw_usage_detail = [&](const Rect &box, const OverviewData &deepseek_item, const OverviewData &codex_item) {
+        draw_outline_round_rect(box, 0);
+        it.printf(box.x + 14, box.y + 11, id(font_title), "今日消耗明细");
+
+        auto draw_row = [&](int top, const char *name, const OverviewData &item) {
+          it.printf(box.x + 16, top, id(font_title), "%s", name);
+          it.printf(box.x + box.w - 16, top, id(font_metric), TextAlign::TOP_RIGHT, "%s", format_token_m(item).c_str());
+          std::string stats = "请求 " + std::to_string(item.requests) + "   成本 " + format_money(item.cost);
+          it.printf(box.x + 16, top + 27, id(font_sm), "%s", fit_text_width(id(font_sm), stats, box.w - 32).c_str());
+        };
+
+        draw_row(box.y + 48, "DeepSeek", deepseek_item);
+        it.line(box.x + 14, box.y + 105, box.x + box.w - 14, box.y + 105);
+        draw_row(box.y + 122, "Codex", codex_item);
       };
 
       auto status_severity = [&](const RowData &row) -> int {
@@ -1203,8 +1237,9 @@ display:
         int track_y = box.y + (show_reset ? 91 : 63);
         int divider_top = box.y + (show_reset ? 64 : 38);
         int divider_bottom = box.y + (show_reset ? 107 : 79);
-        Rect five_track{box.x + 12, track_y, 190, 9};
-        Rect week_track{box.x + 252, track_y, 230, 9};
+        int divider_x = box.x + box.w / 2;
+        Rect five_track{box.x + 12, track_y, divider_x - box.x - 32, 9};
+        Rect week_track{divider_x + 20, track_y, box.x + box.w - divider_x - 32, 9};
 
         draw_outline_round_rect(box, 0);
         it.printf(box.x + 12, box.y + 10, id(font_title), "%s", fit_text_width(id(font_title), title, box.w - 24).c_str());
@@ -1213,14 +1248,38 @@ display:
         }
 
         it.printf(box.x + 12, metric_top, id(font_metric), "5H");
-        it.printf(box.x + 197, metric_top, id(font_metric), TextAlign::TOP_RIGHT, "%s", format_percent(row.five_percent).c_str());
+        it.printf(divider_x - 20, metric_top, id(font_metric), TextAlign::TOP_RIGHT, "%s", format_percent(row.five_percent).c_str());
         draw_progress(five_track, row.five_percent, true);
 
-        it.line(box.x + 227, divider_top, box.x + 227, divider_bottom);
+        it.line(divider_x, divider_top, divider_x, divider_bottom);
 
-        it.printf(box.x + 252, metric_top, id(font_metric), "Week");
-        it.printf(box.x + 478, metric_top, id(font_metric), TextAlign::TOP_RIGHT, "%s", format_percent(row.week_percent).c_str());
+        it.printf(divider_x + 20, metric_top, id(font_metric), "Week");
+        it.printf(box.x + box.w - 12, metric_top, id(font_metric), TextAlign::TOP_RIGHT, "%s", format_percent(row.week_percent).c_str());
         draw_progress(week_track, row.week_percent, true);
+      };
+
+      auto draw_combined_quota = [&](const Rect &box, const DeepSeekQuotaData &deepseek_data, const std::string &reset_text, const RowData &codex_row) {
+        int divider_x = box.x + box.w / 2;
+        Rect five_track{box.x + 12, box.y + 179, divider_x - box.x - 32, 9};
+        Rect week_track{divider_x + 20, box.y + 179, box.x + box.w - divider_x - 32, 9};
+
+        draw_outline_round_rect(box, 0);
+        it.printf(box.x + 12, box.y + 10, id(font_title), "额度概览");
+        it.printf(box.x + 12, box.y + 40, id(font_metric), "DeepSeek %s", deepseek_data.label.c_str());
+        it.printf(box.x + box.w - 12, box.y + 39, id(font_title), TextAlign::TOP_RIGHT, "%s", deepseek_data.remaining.c_str());
+        it.printf(box.x + 12, box.y + 65, id(font_xs), "%s", fit_text_width(id(font_xs), deepseek_data.detail, box.w - 24).c_str());
+
+        it.line(box.x + 12, box.y + 91, box.x + box.w - 12, box.y + 91);
+        it.printf(box.x + 12, box.y + 101, id(font_metric), "Codex 订阅额度");
+        it.printf(box.x + 12, box.y + 127, id(font_xs), "%s", fit_text_width(id(font_xs), reset_text, box.w - 24).c_str());
+
+        it.printf(box.x + 12, box.y + 153, id(font_metric), "5H");
+        it.printf(divider_x - 20, box.y + 153, id(font_metric), TextAlign::TOP_RIGHT, "%s", format_percent(codex_row.five_percent).c_str());
+        draw_progress(five_track, codex_row.five_percent, true);
+        it.line(divider_x, box.y + 153, divider_x, box.y + 195);
+        it.printf(divider_x + 20, box.y + 153, id(font_metric), "Week");
+        it.printf(box.x + box.w - 12, box.y + 153, id(font_metric), TextAlign::TOP_RIGHT, "%s", format_percent(codex_row.week_percent).c_str());
+        draw_progress(week_track, codex_row.week_percent, true);
       };
 
       auto split_alert = [&](const std::string &alert, std::string &line_one, std::string &line_two) {
@@ -1276,14 +1335,22 @@ display:
           updated_at = updated != nullptr ? updated : "--";
           refresh_seconds = root["refresh_seconds"] | 0;
 
-          JsonObject claude_obj = root["claude"];
-          const char *claude_value = claude_obj["value"] | "--";
-          const char *claude_cost = claude_obj["cost"] | "--";
-          claude.value = claude_value != nullptr ? claude_value : "--";
-          claude.cost = claude_cost != nullptr ? claude_cost : "--";
-          claude.requests = claude_obj["requests"] | 0;
-          claude.enabled = claude_obj["enabled"] | -1;
-          claude.value_numeric = claude_obj["value_numeric"] | 0;
+          JsonObject deepseek_obj = root["deepseek"];
+          const char *deepseek_value = deepseek_obj["value"] | "--";
+          const char *deepseek_cost = deepseek_obj["cost"] | "--";
+          deepseek.value = deepseek_value != nullptr ? deepseek_value : "--";
+          deepseek.cost = deepseek_cost != nullptr ? deepseek_cost : "--";
+          deepseek.requests = deepseek_obj["requests"] | 0;
+          deepseek.enabled = deepseek_obj["enabled"] | -1;
+          deepseek.value_numeric = deepseek_obj["value_numeric"] | 0;
+
+          JsonObject deepseek_quota_obj = root["deepseek_quota"];
+          const char *deepseek_quota_label = deepseek_quota_obj["label"] | "额度";
+          const char *deepseek_quota_remaining = deepseek_quota_obj["remaining"] | "--";
+          const char *deepseek_quota_detail = deepseek_quota_obj["detail"] | "未设置平台额度";
+          deepseek_quota.label = deepseek_quota_label != nullptr ? deepseek_quota_label : "额度";
+          deepseek_quota.remaining = deepseek_quota_remaining != nullptr ? deepseek_quota_remaining : "--";
+          deepseek_quota.detail = deepseek_quota_detail != nullptr ? deepseek_quota_detail : "未设置平台额度";
 
           JsonObject codex_obj = root["codex"];
           const char *codex_value = codex_obj["value"] | "--";
@@ -1303,17 +1370,6 @@ display:
           total.alerts = total_obj["alerts"] | 0;
           total.enabled = -1;
           total.value_numeric = total_obj["value_numeric"] | 0;
-
-          JsonArray claude_array = root["claude_rows"].as<JsonArray>();
-          if (!claude_array.isNull()) {
-            for (JsonVariant row_var : claude_array) {
-              if (claude_row_count >= 2) {
-                break;
-              }
-              load_row(row_var.as<JsonObject>(), claude_rows[claude_row_count]);
-              claude_row_count++;
-            }
-          }
 
           JsonArray codex_array = root["codex_rows"].as<JsonArray>();
           if (!codex_array.isNull()) {
@@ -1339,9 +1395,7 @@ display:
           }
 
           JsonObject reset_obj = root["reset_hints"];
-          const char *reset_claude_text = reset_obj["claude_five_hour"] | "--";
           const char *reset_codex_text = reset_obj["codex_five_hour"] | "--";
-          reset_claude = reset_claude_text != nullptr ? reset_claude_text : "--";
           reset_codex = reset_codex_text != nullptr ? reset_codex_text : "--";
           return true;
         });
@@ -1362,10 +1416,10 @@ display:
 
       // Overview cards use the live metric globals so routine partial refreshes
       // only need to update the changing business numbers.
-      claude.value = id(claude_value_live);
-      claude.cost = id(claude_cost_live);
-      claude.requests = id(claude_requests_live);
-      claude.enabled = id(claude_enabled_live);
+      deepseek.value = id(deepseek_value_live);
+      deepseek.cost = id(deepseek_cost_live);
+      deepseek.requests = id(deepseek_requests_live);
+      deepseek.enabled = id(deepseek_enabled_live);
 
       codex.value = id(codex_value_live);
       codex.cost = id(codex_cost_live);
@@ -1377,7 +1431,6 @@ display:
       total.requests = id(total_requests_live);
       total.alerts = id(total_alerts_live);
 
-      RowData claude_focus = pick_focus_row(claude_rows, claude_row_count);
       RowData codex_focus = pick_focus_row(codex_rows, codex_row_count);
       std::string alert_title = "暂无告警";
       std::string alert_detail;
@@ -1387,12 +1440,11 @@ display:
 
       Rect frame{9, 9, 782, 462};
       Rect header{18, 17, 764, 36};
-      Rect overview_claude{18, 58, 248, 130};
+      Rect overview_deepseek{18, 58, 248, 130};
       Rect overview_codex{276, 58, 248, 130};
       Rect overview_total{534, 58, 248, 130};
-      Rect quota_claude{18, 193, 506, 135};
-      Rect quota_codex{18, 333, 506, 138};
-      Rect system_panel{534, 193, 248, 278};
+      Rect usage_detail{18, 193, 365, 278};
+      Rect quota_codex{393, 193, 389, 278};
       Rect failure_panel{18, 58, 764, 413};
 
       bool show_low_battery_badge = id(low_battery_active);
@@ -1428,10 +1480,13 @@ display:
         return;
       }
 
-      draw_overview_card(overview_claude, "Claude", claude);
+      draw_overview_card(overview_deepseek, "DeepSeek", deepseek);
       draw_overview_card(overview_codex, "Codex", codex);
       draw_overview_card(overview_total, "合计", total);
 
-      draw_quota_card(quota_claude, "Claude 配额", reset_claude, claude_focus, true);
-      draw_quota_card(quota_codex, "Codex 配额", reset_codex, codex_focus, true);
-      draw_system_panel(system_panel, alert_count, alert_title, alert_detail, refresh_seconds);
+      draw_usage_detail(usage_detail, deepseek, codex);
+      draw_combined_quota(quota_codex, deepseek_quota, reset_codex, codex_focus);
+      std::string refresh_text = refresh_seconds > 0 ? "刷新 " + std::to_string(refresh_seconds) + "s" : "刷新 --";
+      it.line(quota_codex.x + 14, quota_codex.y + 211, quota_codex.x + quota_codex.w - 14, quota_codex.y + 211);
+      it.printf(quota_codex.x + 14, quota_codex.y + 229, id(font_sm), "%s", fit_text_width(id(font_sm), alert_count > 0 ? alert_title + " " + alert_detail : "额度状态正常", 240).c_str());
+      it.printf(quota_codex.x + quota_codex.w - 14, quota_codex.y + 229, id(font_sm), TextAlign::TOP_RIGHT, "%s", refresh_text.c_str());

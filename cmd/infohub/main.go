@@ -57,8 +57,8 @@ func main() {
 	cancelInitial()
 
 	handler := api.NewRouter(dataStore, registry, taskScheduler, logger, cfg.Server.AuthToken, cfg.Server.DashboardToken, cfg.Server.EffectiveIngestToken(), cfg.Server.MockEnabled, api.DashboardSources{
-		Claude: cfg.Dashboard.Sources.Claude,
-		Codex:  cfg.Dashboard.Sources.Codex,
+		Sub2API: cfg.Dashboard.Sources.Sub2API,
+		Codex:   cfg.Dashboard.Sources.Codex,
 	})
 	server := &http.Server{
 		Addr:              cfg.Server.Address(),

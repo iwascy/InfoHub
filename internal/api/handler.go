@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"infohub/internal/collector"
@@ -31,8 +32,15 @@ type HandlerOptions struct {
 }
 
 type DashboardSources struct {
-	Claude string
-	Codex  string
+	Sub2API string
+	Codex   string // Deprecated alias for Sub2API.
+}
+
+func (s DashboardSources) Sub2APIKey() string {
+	if key := strings.TrimSpace(s.Sub2API); key != "" {
+		return key
+	}
+	return strings.TrimSpace(s.Codex)
 }
 
 func NewHandlerWithOptions(store store.Store, registry *collector.Registry, scheduler *scheduler.Scheduler, options HandlerOptions) *Handler {

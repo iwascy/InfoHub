@@ -62,8 +62,7 @@ server:
 
 dashboard:
   sources:
-    claude: "claude_relay"
-    codex: "sub2api"
+    sub2api: "sub2api"
 
 collectors:
   claude_relay:
@@ -119,7 +118,7 @@ log:
   level: "${INFOHUB_LOG_LEVEL}"
 ```
 
-To show local Claude Code / Codex CLI data on the dashboard, set `dashboard.sources.claude` to `claude_local` and `dashboard.sources.codex` to `codex_local`.
+The dashboard splits today's sub2api usage by upstream endpoint: `/v1/messages` is shown as DeepSeek and `/v1/responses` as Codex. The quota panel shows DeepSeek's Anthropic daily/weekly/monthly USD quota (daily first, with user balance as the fallback when no window limit is configured) alongside Codex OAuth 5H/Week quota.
 
 ### Key Environment Variables
 

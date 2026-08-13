@@ -64,8 +64,7 @@ server:
 
 dashboard:
   sources:
-    claude: "claude_relay"
-    codex: "sub2api"
+    sub2api: "sub2api"
 
 collectors:
   claude_relay:
@@ -121,7 +120,7 @@ log:
   level: "${INFOHUB_LOG_LEVEL}"
 ```
 
-如果主要展示本机 Claude Code / Codex CLI 数据，请把 `dashboard.sources.claude` 改成 `claude_local`，把 `dashboard.sources.codex` 改成 `codex_local`。
+仪表盘按 sub2api 的上游端点拆分今日消耗：`/v1/messages` 展示为 DeepSeek，`/v1/responses` 展示为 Codex。右侧同时显示 DeepSeek 的 Anthropic 平台日/周/月美元额度（优先展示日额度，未设周期限额时回退用户余额）和 Codex OAuth 账号的 5H/Week 额度。
 
 ### 关键环境变量
 

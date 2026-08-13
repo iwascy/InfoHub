@@ -59,8 +59,8 @@ type DashboardConfig struct {
 }
 
 type DashboardSourceConfig struct {
-	Claude string `yaml:"claude"`
-	Codex  string `yaml:"codex"`
+	Sub2API string `yaml:"sub2api"`
+	Codex   string `yaml:"codex"` // Deprecated alias for sub2api.
 }
 
 type CollectorsConfig struct {

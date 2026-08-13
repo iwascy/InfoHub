@@ -12,8 +12,7 @@ server:
 
 dashboard:
   sources:
-    claude: "claude_relay"
-    codex: "sub2api"
+    sub2api: "sub2api"
 
 collectors:
   claude_relay:
@@ -50,6 +49,8 @@ collectors:
         today_stats: "/api/v1/admin/accounts/today-stats/batch"
         search_users: "/api/v1/admin/usage/search-users"
         usage_stats: "/api/v1/admin/usage/stats"
+        user_platform_quotas: "/api/v1/admin/users/{id}/platform-quotas"
+        user_detail: "/api/v1/admin/users/{id}"
     targets:
       - type: "user"
         name: "admin@sub2api.cccy.fun"

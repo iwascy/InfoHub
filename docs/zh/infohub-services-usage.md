@@ -246,7 +246,7 @@ curl -H "Authorization: Bearer $INFOHUB_AUTH_TOKEN" \
 
 ### 4.2 `sub2api`
 
-用途：采集 Sub2API 的 OpenAI/Codex OAuth 账号额度，以及指定用户今日用量。
+用途：采集 Sub2API 的 OpenAI/Codex OAuth 账号额度、指定用户今日用量，以及该用户的 Anthropic 平台额度（面板映射为 DeepSeek）。
 
 最小配置：
 
@@ -263,6 +263,8 @@ collectors:
         today_stats: "/api/v1/admin/accounts/today-stats/batch"
         search_users: "/api/v1/admin/usage/search-users"
         usage_stats: "/api/v1/admin/usage/stats"
+        user_platform_quotas: "/api/v1/admin/users/{id}/platform-quotas"
+        user_detail: "/api/v1/admin/users/{id}"
     targets:
       - type: "user"
         email: "admin@example.com"
@@ -294,6 +296,8 @@ collectors:
 |----------|------|
 | `token_usage` | 匹配账号/用户合计今日 token、请求数、成本 |
 | `token_usage_user` | 指定用户今日 token、请求数、成本 |
+| `token_usage_product` | 按上游端点拆分的 DeepSeek/Codex 今日 token、请求数、成本 |
+| `product_quota` | DeepSeek 的日/周/月美元剩余额度；均未配置时回退用户余额 |
 | `quota` | 每个账号的 Codex 5H/Week 剩余额度 |
 
 验证：
@@ -466,23 +470,15 @@ http://<infohub-host>:8080/dashboard/eink.json?token=<DASHBOARD_TOKEN>&refresh=3
 http://<infohub-host>:8080/dashboard/eink/device.json?token=<DASHBOARD_TOKEN>&refresh=300
 ```
 
-仪表盘默认展示 `dashboard.sources` 指定的两个主槽位：
+仪表盘默认读取 `dashboard.sources.sub2api`，并把同一用户的今日消耗按上游端点拆成 DeepSeek 与 Codex：
 
 ```yaml
 dashboard:
   sources:
-    claude: "claude_local"
-    codex: "codex_local"
+    sub2api: "sub2api"
 ```
 
-如果主要看远端网关，可以改成：
-
-```yaml
-dashboard:
-  sources:
-    claude: "claude_relay"
-    codex: "sub2api"
-```
+`/v1/messages` 归为 DeepSeek，`/v1/responses` 归为 Codex。面板同时展示两者的 Token、请求、成本，DeepSeek 的 Anthropic 平台美元额度（没有周期限额时显示用户余额），以及 Codex OAuth 账号的 5H/Week 剩余额度。
 
 ESPHome 设备配置入口在 `deploy/esphome`。首刷、Docker 编译、设备直连和局部刷新文档见：
 

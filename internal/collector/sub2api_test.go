@@ -143,7 +143,7 @@ func TestSub2APICollectorCollect(t *testing.T) {
 	if err != nil {
 		t.Fatalf("collect failed: %v", err)
 	}
-	if len(items) != 5 {
+	if len(items) != 7 {
 		t.Fatalf("unexpected item count: %d", len(items))
 	}
 
@@ -153,6 +153,19 @@ func TestSub2APICollectorCollect(t *testing.T) {
 	}
 	if got := tokenItem.Extra["daily_requests"]; got != 10.0 {
 		t.Fatalf("unexpected request total: %v", got)
+	}
+	var codexTokens float64
+	for _, item := range items {
+		if item.Category == "token_usage_product" && item.Extra["product"] == "codex" {
+			if item.Value == "111" {
+				codexTokens += 111
+			} else if item.Value == "222" {
+				codexTokens += 222
+			}
+		}
+	}
+	if codexTokens != 333 {
+		t.Fatalf("unexpected Codex product total: %v", codexTokens)
 	}
 	if got := mustFindItem(t, items, "账号 openai-a 5H 额度").Value; got != "67.50%" {
 		t.Fatalf("unexpected openai-a 5H value: %s", got)
@@ -229,6 +242,29 @@ func TestSub2APICollectorCollectTargetsUserAndAccount(t *testing.T) {
 				"total_requests":     7,
 				"total_actual_cost":  1.23,
 				"total_account_cost": 2.34,
+				"upstream_endpoints": []map[string]any{
+					{"endpoint": "/v1/messages", "requests": 2, "total_tokens": 2345, "actual_cost": 0.23},
+					{"endpoint": "/v1/responses", "requests": 5, "total_tokens": 10000, "actual_cost": 1.00},
+				},
+			})
+		case "/api/v1/admin/users/88/platform-quotas":
+			expectAuthHeader(t, r, "Bearer sub2api-session")
+			writeJSON(t, w, map[string]any{
+				"data": map[string]any{
+					"platform_quotas": []map[string]any{
+						{
+							"platform":                 "anthropic",
+							"daily_limit_usd":          10.0,
+							"daily_usage_usd":          1.25,
+							"daily_window_resets_at":   "2026-05-26T00:00:00+08:00",
+							"weekly_limit_usd":         nil,
+							"weekly_usage_usd":         2.0,
+							"monthly_limit_usd":        100.0,
+							"monthly_usage_usd":        22.5,
+							"monthly_window_resets_at": "2026-06-20T00:00:00+08:00",
+						},
+					},
+				},
 			})
 		case "/api/v1/admin/accounts/today-stats/batch":
 			todayStatsCalled = true
@@ -259,10 +295,12 @@ func TestSub2APICollectorCollectTargetsUserAndAccount(t *testing.T) {
 		Service: config.HTTPServiceConfig{
 			BaseURL: server.URL,
 			Endpoints: map[string]string{
-				"accounts":     "/api/v1/admin/accounts",
-				"today_stats":  "/api/v1/admin/accounts/today-stats/batch",
-				"search_users": "/api/v1/admin/usage/search-users",
-				"usage_stats":  "/api/v1/admin/usage/stats",
+				"accounts":             "/api/v1/admin/accounts",
+				"today_stats":          "/api/v1/admin/accounts/today-stats/batch",
+				"search_users":         "/api/v1/admin/usage/search-users",
+				"usage_stats":          "/api/v1/admin/usage/stats",
+				"user_platform_quotas": "/api/v1/admin/users/{id}/platform-quotas",
+				"user_detail":          "/api/v1/admin/users/{id}",
 			},
 		},
 		Auth: config.HTTPAuthConfig{
@@ -300,6 +338,24 @@ func TestSub2APICollectorCollectTargetsUserAndAccount(t *testing.T) {
 	if got := mustFindItem(t, items, "admin@sub2api.cccy.fun 今日 Token 用量").Value; got != "12345" {
 		t.Fatalf("unexpected user token item: %s", got)
 	}
+	deepSeekItem := mustFindItem(t, items, "DeepSeek 今日 Token 用量")
+	if deepSeekItem.Value != "2345" || deepSeekItem.Extra["product"] != "deepseek" || deepSeekItem.Extra["daily_requests"] != 2.0 {
+		t.Fatalf("unexpected DeepSeek item: %+v", deepSeekItem)
+	}
+	codexItem := mustFindItem(t, items, "Codex 今日 Token 用量")
+	if codexItem.Value != "10000" || codexItem.Extra["product"] != "codex" || codexItem.Extra["daily_cost"] != 1.0 {
+		t.Fatalf("unexpected Codex item: %+v", codexItem)
+	}
+	deepSeekDailyQuota := mustFindItem(t, items, "DeepSeek 日额度")
+	if deepSeekDailyQuota.Value != "$8.75" || deepSeekDailyQuota.Extra["remaining_percent"] != 87.5 || deepSeekDailyQuota.Extra["quota_source"] != "platform_quota" {
+		t.Fatalf("unexpected DeepSeek daily quota: %+v", deepSeekDailyQuota)
+	}
+	if got := mustFindItem(t, items, "DeepSeek 月额度").Value; got != "$77.50" {
+		t.Fatalf("unexpected DeepSeek monthly quota: %s", got)
+	}
+	if hasItem(items, "DeepSeek 周额度") || hasItem(items, "DeepSeek 账户余额") {
+		t.Fatal("unset platform window should be omitted and balance should not replace configured quota")
+	}
 	if got := mustFindItem(t, items, "账号 Pro 20x 5H 额度").Value; got != "75%" {
 		t.Fatalf("unexpected Pro 20x 5H value: %s", got)
 	}
@@ -308,6 +364,44 @@ func TestSub2APICollectorCollectTargetsUserAndAccount(t *testing.T) {
 	}
 	if hasItem(items, "账号 Other Pro 5H 额度") {
 		t.Fatal("unexpected quota item for unmatched account")
+	}
+}
+
+func TestSub2APIDeepSeekQuotaFallsBackToUserBalance(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/admin/accounts":
+			writeJSON(t, w, map[string]any{"data": map[string]any{"items": []any{}}})
+		case "/api/v1/admin/usage/stats":
+			writeJSON(t, w, map[string]any{"total_tokens": 0, "upstream_endpoints": []any{}})
+		case "/api/v1/admin/users/88/platform-quotas":
+			writeJSON(t, w, map[string]any{"platform_quotas": []map[string]any{{
+				"platform": "anthropic", "daily_limit_usd": nil, "weekly_limit_usd": nil, "monthly_limit_usd": nil,
+			}}})
+		case "/api/v1/admin/users/88":
+			writeJSON(t, w, map[string]any{"balance": 42.75})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	collector := NewSub2APICollector(config.HTTPCollectorConfig{
+		TimeoutSeconds: 2,
+		Targets:        []config.Sub2APITarget{{Type: "user", ID: "88", Name: "DeepSeek User"}},
+		Service: config.HTTPServiceConfig{BaseURL: server.URL, Endpoints: map[string]string{
+			"accounts": "/api/v1/admin/accounts", "usage_stats": "/api/v1/admin/usage/stats",
+			"user_platform_quotas": "/api/v1/admin/users/{id}/platform-quotas", "user_detail": "/api/v1/admin/users/{id}",
+		}},
+	}, nil)
+
+	items, err := collector.Collect(context.Background())
+	if err != nil {
+		t.Fatalf("collect failed: %v", err)
+	}
+	quota := mustFindItem(t, items, "DeepSeek 账户余额")
+	if quota.Value != "$42.75" || quota.Extra["window"] != "balance" || quota.Extra["quota_source"] != "user_balance" {
+		t.Fatalf("unexpected DeepSeek balance quota: %+v", quota)
 	}
 }
 
