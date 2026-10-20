@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="refresh" content="{{.RefreshSeconds}}">
+  <title>InfoHub 墨水屏面板</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f1efe9;
+      --panel: #f8f7f2;
+      --ink: #111111;
+      --muted: #4b4b4b;
+      --line: #222222;
+      --soft-line: #9a9a9a;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+    body {
+      overflow: hidden;
+      display: grid;
+      place-items: center;
+    }
+    .page {
+      container-type: size;
+      position: relative;
+      width: min(100vw, calc(100vh * 1.6666667));
+      height: min(100vh, calc(100vw * 0.6));
+      aspect-ratio: 800 / 480;
+      background: var(--bg);
+      overflow: hidden;
+    }
+    .frame, .header, .overview-card, .detail-panel, .quota-panel {
+      position: absolute;
+      background: var(--panel);
+      border: 0.1875vmin solid var(--line);
+    }
+    .frame { left: 1.125%; top: 1.875%; width: 97.75%; height: 96.25%; border-radius: 1.042%; }
+    .header {
+      left: 2.25%; top: 3.542%; width: 95.5%; height: 9.167%;
+      border-radius: 0.833%;
+      display: flex;
+      align-items: center;
+      padding: 0 1.25%;
+    }
+    .title { font-size: 4.583vmin; font-weight: 700; line-height: 1; }
+    .subtitle { margin-left: 1.5%; font-size: 2.5vmin; font-weight: 700; color: var(--muted); }
+    .refresh {
+      position: absolute;
+      left: 50%;
+      transform: translateX(-50%);
+      font-size: 3.125vmin;
+      font-weight: 600;
+      color: #444444;
+      white-space: nowrap;
+    }
+    .badge {
+      margin-left: auto;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 10%;
+      height: 5vmin;
+      padding: 0 1.5%;
+      border-radius: 999px;
+      border: 0.125vmin solid var(--line);
+      font-size: 2.708vmin;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+    .badge.solid { background: var(--ink); color: var(--panel); }
+    .overview-card { top: 14.583%; width: 31%; height: 28.75%; padding: 1.875% 1.5% 0; }
+    .overview-card.deepseek { left: 2.25%; }
+    .overview-card.codex { left: 34.5%; }
+    .overview-card.total { left: 66.75%; }
+    .overview-title, .panel-title {
+      font-size: 3.542vmin;
+      font-weight: 700;
+      line-height: 1;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .overview-value {
+      margin-top: 2.5%;
+      font-size: 10.625vmin;
+      font-weight: 700;
+      line-height: 1.08;
+      letter-spacing: 0;
+      white-space: nowrap;
+      overflow: hidden;
+    }
+    .overview-divider {
+      position: absolute;
+      left: 4.839%; right: 4.839%; bottom: 7.083vmin;
+      border-top: 0.125vmin solid var(--soft-line);
+    }
+    .overview-cost {
+      position: absolute;
+      left: 4.839%; bottom: 2.292vmin;
+      font-size: 2.917vmin;
+      font-weight: 700;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+    .overview-meta { position: absolute; right: 4.839%; bottom: 2.292vmin; font-size: 2.708vmin; font-weight: 700; color: var(--muted); }
+    .detail-panel { left: 2.25%; top: 45%; width: 46%; height: 53.125%; padding: 2.083% 1.5%; }
+    .usage-row { position: relative; height: 16.25vmin; padding: 2.083vmin 1.25vmin 0; border-bottom: 0.125vmin solid var(--soft-line); }
+    .usage-row:last-child { border-bottom: 0; }
+    .usage-name { font-size: 3.333vmin; font-weight: 700; }
+    .usage-token { position: absolute; right: 1.25vmin; top: 1.667vmin; font-size: 4.167vmin; font-weight: 700; }
+    .usage-stats { margin-top: 2.083vmin; display: flex; gap: 3.333vmin; font-size: 2.708vmin; font-weight: 700; color: var(--muted); }
+    .quota-panel { left: 49.5%; top: 45%; width: 48.25%; height: 53.125%; padding: 2.083% 1.5%; }
+    .deepseek-quota {
+      margin-top: 2.083vmin;
+      padding-bottom: 2.083vmin;
+      border-bottom: 0.125vmin solid var(--soft-line);
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 0.833vmin 2.5vmin;
+      align-items: baseline;
+    }
+    .deepseek-quota strong { font-size: 3.125vmin; }
+    .deepseek-quota-value { font-size: 3.542vmin; font-weight: 700; }
+    .deepseek-quota-meta { grid-column: 1 / -1; font-size: 2.5vmin; font-weight: 700; color: var(--muted); }
+    .quota-reset {
+      margin-top: 1.667vmin;
+      font-size: 2.5vmin;
+      font-weight: 700;
+      color: var(--muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .metric-row {
+      margin-top: 2.083vmin;
+      display: grid;
+      grid-template-columns: 1fr 0.125vmin 1fr;
+      column-gap: 2.5vmin;
+      align-items: start;
+    }
+    .metric { min-width: 0; }
+    .metric-head {
+      display: flex;
+      justify-content: space-between;
+      font-size: 3.333vmin;
+      font-weight: 700;
+      line-height: 1;
+    }
+    .progress-cell { margin-top: 2.292vmin; }
+    .progress-track {
+      width: 100%;
+      height: 1.875vmin;
+      border: 0.125vmin solid #bbbbbb;
+      border-radius: 999px;
+      overflow: hidden;
+    }
+    .progress-fill {
+      height: calc(100% - 0.416vmin);
+      margin: 0.208vmin;
+      border-radius: 999px;
+      background: #333333;
+    }
+    .metric-divider {
+      width: 0;
+      height: 8.333vmin;
+      background: var(--soft-line);
+      margin: 0 auto;
+    }
+    .quota-footer { position: absolute; left: 3.109%; right: 3.109%; bottom: 2.5vmin; padding-top: 2.083vmin; border-top: 0.125vmin solid var(--soft-line); display: flex; align-items: center; justify-content: space-between; }
+    .alert-text {
+      max-width: 72%; font-size: 2.708vmin;
+      font-weight: 700;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .refresh-cycle { font-size: 2.5vmin; font-weight: 700; color: var(--muted); white-space: nowrap; }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <div class="frame"></div>
+    <header class="header">
+      <div class="title">InfoHub</div>
+      <div class="subtitle">SUB2API CONSUMPTION</div>
+      <div class="refresh">{{.UpdatedAt}}</div>
+      <div class="badge solid">状态 正常</div>
+    </header>
+
+    <article class="overview-card deepseek">
+      <div class="overview-title">DeepSeek</div>
+      <div class="overview-value">{{.Device.DeepSeek.DisplayValue}}</div>
+      <div class="overview-divider"></div>
+      <div class="overview-cost">${{.Device.DeepSeek.Cost}}</div>
+      <div class="overview-meta">{{.Device.DeepSeek.Requests}} 次</div>
+    </article>
+    <article class="overview-card codex">
+      <div class="overview-title">Codex</div>
+      <div class="overview-value">{{.Device.Codex.DisplayValue}}</div>
+      <div class="overview-divider"></div>
+      <div class="overview-cost">${{.Device.Codex.Cost}}</div>
+      <div class="overview-meta">{{.Device.Codex.Requests}} 次</div>
+    </article>
+    <article class="overview-card total">
+      <div class="overview-title">合计</div>
+      <div class="overview-value">{{.Device.Total.DisplayValue}}</div>
+      <div class="overview-divider"></div>
+      <div class="overview-cost">${{.Device.Total.Cost}}</div>
+      <div class="overview-meta">{{.Device.Total.Requests}} 次</div>
+    </article>
+
+    <section class="detail-panel">
+      <div class="panel-title">今日消耗明细</div>
+      <div class="usage-row">
+        <div class="usage-name">DeepSeek</div><div class="usage-token">{{.Device.DeepSeek.DisplayValue}}</div>
+        <div class="usage-stats"><span>请求 {{.Device.DeepSeek.Requests}}</span><span>成本 ${{.Device.DeepSeek.Cost}}</span></div>
+      </div>
+      <div class="usage-row">
+        <div class="usage-name">Codex</div><div class="usage-token">{{.Device.Codex.DisplayValue}}</div>
+        <div class="usage-stats"><span>请求 {{.Device.Codex.Requests}}</span><span>成本 ${{.Device.Codex.Cost}}</span></div>
+      </div>
+    </section>
+
+    <section class="quota-panel">
+      <div class="panel-title">额度概览</div>
+      <div class="deepseek-quota">
+        <strong>DeepSeek {{.Device.DeepSeekQuota.Label}}</strong>
+        <span class="deepseek-quota-value">{{.Device.DeepSeekQuota.Remaining}}</span>
+        <span class="deepseek-quota-meta">{{.Device.DeepSeekQuota.Detail}}</span>
+      </div>
+      <div class="quota-reset"><strong>Codex 订阅额度</strong> {{.Sub2APITable.FiveHourReset}}</div>
+      <div class="metric-row">
+        <div class="metric">
+          <div class="metric-head"><span>5H</span><span>{{.Sub2APITable.FocusRow.FiveHour.Text}}</span></div>
+          <div class="progress-cell"><div class="progress-track"><div class="progress-fill" style="width: {{.Sub2APITable.FocusRow.FiveHour.Percent}}%"></div></div></div>
+        </div>
+        <div class="metric-divider"></div>
+        <div class="metric">
+          <div class="metric-head"><span>Week</span><span>{{.Sub2APITable.FocusRow.Week.Text}}</span></div>
+          <div class="progress-cell"><div class="progress-track"><div class="progress-fill" style="width: {{.Sub2APITable.FocusRow.Week.Percent}}%"></div></div></div>
+        </div>
+      </div>
+      <div class="quota-footer"><div class="alert-text">{{if .AlertTitle}}{{.AlertTitle}} {{.AlertDetail}}{{else}}额度状态正常{{end}}</div><div class="refresh-cycle">刷新 {{.RefreshSeconds}}s</div></div>
+    </section>
+  </main>
+</body>
+</html>

@@ -120,7 +120,15 @@ log:
   level: "${INFOHUB_LOG_LEVEL}"
 ```
 
-仪表盘按 sub2api 的上游端点拆分今日消耗：`/v1/messages` 展示为 DeepSeek，`/v1/responses` 展示为 Codex。右侧同时显示 DeepSeek 的 Anthropic 平台日/周/月美元额度（优先展示日额度，未设周期限额时回退用户余额）和 Codex OAuth 账号的 5H/Week 额度。
+仪表盘默认使用 `trio` 模板（Claude Pro · Codex · Antigravity）：上方三栏展示各平台今日 / 本周 Token，下方按平台分组展示每个账号或模型分组的 5H / Week 剩余额度和重置时间，不展示告警。数据来源：
+
+- Claude Pro：`collectors.cpa` 读取 CLIProxyAPI（CPA）管理接口。额度经 `POST /v0/management/api-call` 代调 Anthropic `/api/oauth/usage`；用量从 CPA 的 `usage-queue` 拉取后缓存到 sqlite，再按北京时间今日 / 周一至今汇总。该队列读后即删，只能有一个 infohub 实例开启 `CPA_ENABLED`；CPA 的 `redis-usage-queue-retention-seconds` 默认 60 秒，建议调到 3600，避免 infohub 重启期间丢记录。部署前队列里已过期的历史用量无法补回。
+- Codex：沿用 Sub2API 账号额度与 `dashboard.accounts` 白名单。
+- Antigravity：本机 `infohub-agent` 开启 `antigravity.enabled`，读取 `~/.gemini/jetski-standalone-oauth-token`，调用 Cloud Code `retrieveUserQuotaSummary`，上报名称含 `Gemini` 的分组（如 `Gemini Models`、`Gemini 4 Argon`）；服务端开启 `ANTIGRAVITY_ENABLED`。Antigravity 没有本地 Token 日志，因此今日用量显示 `--`；只有周额度的分组 5H 显示 `--`。
+
+旧版 `codex` 模板（只有 Codex）：上方展示今日和本周累计 Token，下方仅展示 `cycyzg@gmail.com`、`qqcyan@gmail.com` 的 5H / Week 剩余额度及重置时间，不展示告警。周用量按北京时间周一至今，通过 Sub2API `usage_stats` 的日期范围查询获取，不是滚动七天额度；查询失败显示 `--`，不影响今日用量和账号额度。账号过滤不改变上方原有的用量统计范围。
+
+更早的混合版保留为 `deepseek-codex` 模板，三套模板的存档见 `docs/panel-templates/`。设置 `dashboard.template`（`trio` / `codex` / `deepseek-codex`）可切换默认模板，也可使用 `/dashboard/eink?template=codex` 临时查看旧版；HTML、调试 JSON、设备 JSON 均支持该参数。已有 token / refresh 参数需继续保留。`dashboard.accounts` 配置下方邮箱白名单，默认两个账号。网页支持手机布局，正式 ESPHome 固件支持根据接口的 `template` 字段切换三套 800×480 版式；首次升级仍需编译刷机。
 
 ### 关键环境变量
 

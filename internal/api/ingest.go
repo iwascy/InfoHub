@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"infohub/internal/collector"
 	"infohub/internal/store"
 )
 
@@ -42,14 +43,24 @@ type ingestQuota struct {
 	Week     *ingestQuotaWindow `json:"week"`
 }
 
-type ingestRequest struct {
-	MachineID    string         `json:"machine_id"`
-	AgentVersion string         `json:"agent_version"`
-	Source       string         `json:"source"`
-	ResetFiles   []string       `json:"reset_files"`
-	Records      []ingestRecord `json:"records"`
-	Quota        *ingestQuota   `json:"quota"`
+// ingestQuotaGroup is one independently limited model pool (Antigravity).
+type ingestQuotaGroup struct {
+	Name     string             `json:"name"`
+	FiveHour *ingestQuotaWindow `json:"five_hour"`
+	Week     *ingestQuotaWindow `json:"week"`
 }
+
+type ingestRequest struct {
+	MachineID    string             `json:"machine_id"`
+	AgentVersion string             `json:"agent_version"`
+	Source       string             `json:"source"`
+	ResetFiles   []string           `json:"reset_files"`
+	Records      []ingestRecord     `json:"records"`
+	Quota        *ingestQuota       `json:"quota"`
+	QuotaGroups  []ingestQuotaGroup `json:"quota_groups"`
+}
+
+const maxIngestQuotaGroups = 32
 
 func (h *Handler) IngestLocalUsage(w http.ResponseWriter, r *http.Request) {
 	ingestStore, ok := h.store.(store.IngestStore)
@@ -71,8 +82,12 @@ func (h *Handler) IngestLocalUsage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	source := strings.TrimSpace(req.Source)
+	if source == "antigravity" {
+		h.ingestQuotaGroups(w, r, machine, req)
+		return
+	}
 	if source != "claude_local" && source != "codex_local" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "source must be claude_local or codex_local"})
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "source must be claude_local, codex_local or antigravity"})
 		return
 	}
 	if len(req.Records) > maxIngestRecords {
@@ -133,6 +148,61 @@ func (h *Handler) IngestLocalUsage(w http.ResponseWriter, r *http.Request) {
 		"accepted":  len(records),
 		"refreshed": refreshed,
 	})
+}
+
+// ingestQuotaGroups replaces the machine's Antigravity quota groups; the
+// source carries no usage records.
+func (h *Handler) ingestQuotaGroups(w http.ResponseWriter, r *http.Request, machine string, req ingestRequest) {
+	groupStore, ok := h.store.(store.AgentQuotaGroupStore)
+	if !ok {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "store does not support quota groups (sqlite required)"})
+		return
+	}
+	if len(req.Records) > 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "antigravity accepts quota_groups only"})
+		return
+	}
+	if len(req.QuotaGroups) > maxIngestQuotaGroups {
+		writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": "too many quota groups"})
+		return
+	}
+	now := time.Now()
+	observations := make([]store.AgentQuotaObservation, 0, len(req.QuotaGroups))
+	seen := map[string]bool{}
+	for index, group := range req.QuotaGroups {
+		name := strings.TrimSpace(group.Name)
+		if name == "" || len(name) > 80 || seen[name] {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "quota group name must be unique, non-empty and at most 80 bytes", "group_index": index})
+			return
+		}
+		seen[name] = true
+		obs := store.AgentQuotaObservation{
+			Machine:       machine,
+			Source:        collector.AntigravitySourcePrefix + name,
+			Quota5hUsed:   -1,
+			QuotaWeekUsed: -1,
+			ObservedAt:    now,
+			AgentVersion:  strings.TrimSpace(req.AgentVersion),
+		}
+		if window := group.FiveHour; window != nil {
+			obs.Quota5hUsed, obs.Quota5hReset = window.UsedPercent, strings.TrimSpace(window.ResetAt)
+		}
+		if window := group.Week; window != nil {
+			obs.QuotaWeekUsed, obs.QuotaWeekReset = window.UsedPercent, strings.TrimSpace(window.ResetAt)
+		}
+		observations = append(observations, obs)
+	}
+	if err := groupStore.ReplaceAgentQuotaGroups(machine, collector.AntigravitySourcePrefix, observations); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	refreshed := false
+	if h.scheduler != nil {
+		ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+		defer cancel()
+		refreshed = h.scheduler.TriggerNow(ctx, "antigravity") == nil
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "accepted": len(observations), "refreshed": refreshed})
 }
 
 func (raw ingestRecord) toStoreRecord() (store.LocalUsageRecord, error) {

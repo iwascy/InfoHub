@@ -118,7 +118,15 @@ log:
   level: "${INFOHUB_LOG_LEVEL}"
 ```
 
-The dashboard splits today's sub2api usage by upstream endpoint: `/v1/messages` is shown as DeepSeek and `/v1/responses` as Codex. The quota panel shows DeepSeek's Anthropic daily/weekly/monthly USD quota (daily first, with user balance as the fallback when no window limit is configured) alongside Codex OAuth 5H/Week quota.
+The default `trio` template (Claude Pro · Codex · Antigravity) shows each platform's today / week-to-date tokens in a three-column strip, then the remaining 5H / Week quota and reset time of every account or model group, without alerts. Sources:
+
+- Claude Pro: `collectors.cpa` reads the CLIProxyAPI (CPA) management API. Quota comes from Anthropic `/api/oauth/usage` through `POST /v0/management/api-call`; usage is drained from CPA's `usage-queue`, cached in sqlite and totalled per Asia/Shanghai day and calendar week. The queue is destructive, so enable `CPA_ENABLED` on exactly one infohub instance, and raise CPA's `redis-usage-queue-retention-seconds` (default 60) to 3600 so restarts do not drop records. Usage that expired from the queue before deployment cannot be recovered.
+- Codex: Sub2API account quota filtered by `dashboard.accounts`, as before.
+- Antigravity: `infohub-agent` with `antigravity.enabled` reads `~/.gemini/jetski-standalone-oauth-token`, calls Cloud Code `retrieveUserQuotaSummary` and pushes groups whose name contains `Gemini` (e.g. `Gemini Models`, `Gemini 4 Argon`); enable `ANTIGRAVITY_ENABLED` on the server. Antigravity keeps no local token log, so its daily usage shows `--`; weekly-only groups show `--` for 5H.
+
+The previous `codex` template shows today's and this week's cumulative tokens, followed by remaining 5H / Week quotas and reset times for `cycyzg@gmail.com` and `qqcyan@gmail.com`, without alerts. Weekly usage is Monday-to-date in Asia/Shanghai, queried using explicit dates on Sub2API's `usage_stats` endpoint, not the rolling seven-day quota. A failed weekly query displays `--` without discarding daily usage or quotas. Account filtering does not change the existing usage scope.
+
+The older mixed layout remains available as `deepseek-codex`; archives of every layout live in `docs/panel-templates/`. Set `dashboard.template` (`trio` / `codex` / `deepseek-codex`) for the default, or use `/dashboard/eink?template=codex` for a per-request override. HTML and both JSON endpoints support the parameter; retain existing token and refresh parameters. Configure the email allowlist with `dashboard.accounts` (the two accounts above by default). The web layout is mobile-friendly; the updated ESPHome firmware selects any of the three 800x480 layouts from the response's `template` field. The initial firmware upgrade still requires compiling and flashing.
 
 ### Key Environment Variables
 

@@ -143,7 +143,7 @@ func TestSub2APICollectorCollect(t *testing.T) {
 	if err != nil {
 		t.Fatalf("collect failed: %v", err)
 	}
-	if len(items) != 7 {
+	if len(items) != 9 {
 		t.Fatalf("unexpected item count: %d", len(items))
 	}
 
@@ -234,7 +234,6 @@ func TestSub2APICollectorCollectTargetsUserAndAccount(t *testing.T) {
 			expectAuthHeader(t, r, "Bearer sub2api-session")
 			expectQueryValues(t, r.URL.Query(), map[string]string{
 				"user_id":  "88",
-				"period":   "today",
 				"timezone": "Asia/Shanghai",
 			})
 			writeJSON(t, w, map[string]any{

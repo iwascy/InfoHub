@@ -20,6 +20,7 @@ type Handler struct {
 	scheduler            *scheduler.Scheduler
 	dashboardMockEnabled bool
 	dashboardSources     DashboardSources
+	dashboardOptions     DashboardOptions
 }
 
 func NewHandler(store store.Store, registry *collector.Registry, scheduler *scheduler.Scheduler) *Handler {
@@ -29,6 +30,7 @@ func NewHandler(store store.Store, registry *collector.Registry, scheduler *sche
 type HandlerOptions struct {
 	DashboardMockEnabled bool
 	DashboardSources     DashboardSources
+	Dashboard            DashboardOptions
 }
 
 type DashboardSources struct {
@@ -50,6 +52,7 @@ func NewHandlerWithOptions(store store.Store, registry *collector.Registry, sche
 		scheduler:            scheduler,
 		dashboardMockEnabled: options.DashboardMockEnabled,
 		dashboardSources:     options.DashboardSources,
+		dashboardOptions:     options.Dashboard,
 	}
 }
 

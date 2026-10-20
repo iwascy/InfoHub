@@ -187,3 +187,37 @@ func TestAgentQuotaObservationLatestWins(t *testing.T) {
 		t.Fatalf("latest 5h used = %v, want 55", got.Quota5hUsed)
 	}
 }
+
+func TestReplaceAgentQuotaGroups(t *testing.T) {
+	store := newTestSQLiteStore(t)
+	observed := time.Unix(1700000000, 0)
+	groups := []AgentQuotaObservation{
+		{Source: "antigravity:Gemini Models", Quota5hUsed: 0, Quota5hReset: "2026-10-20T13:31:08Z", QuotaWeekUsed: 31.7, QuotaWeekReset: "2026-10-26T08:58:54Z", ObservedAt: observed},
+		{Source: "antigravity:Gemini 4 Argon", Quota5hUsed: -1, QuotaWeekUsed: 16.7, ObservedAt: observed},
+	}
+	if err := store.ReplaceAgentQuotaGroups("mbp", "antigravity:", groups); err != nil {
+		t.Fatalf("ReplaceAgentQuotaGroups: %v", err)
+	}
+	if err := store.SaveAgentQuotaObservation(AgentQuotaObservation{Machine: "mbp", Source: "claude_local", Quota5hUsed: 1, QuotaWeekUsed: 2}); err != nil {
+		t.Fatalf("SaveAgentQuotaObservation: %v", err)
+	}
+	got, err := store.ListAgentQuotaObservations("antigravity:")
+	if err != nil || len(got) != 2 {
+		t.Fatalf("ListAgentQuotaObservations = %d, %v", len(got), err)
+	}
+
+	// A new report drops groups that vanished upstream and keeps other sources.
+	if err := store.ReplaceAgentQuotaGroups("mbp", "antigravity:", groups[:1]); err != nil {
+		t.Fatalf("ReplaceAgentQuotaGroups again: %v", err)
+	}
+	got, err = store.ListAgentQuotaObservations("antigravity:")
+	if err != nil || len(got) != 1 || got[0].Source != "antigravity:Gemini Models" || got[0].QuotaWeekUsed != 31.7 {
+		t.Fatalf("after replace: %+v, %v", got, err)
+	}
+	if _, ok, _ := store.LatestAgentQuotaObservation("claude_local"); !ok {
+		t.Fatal("replace removed an unrelated source")
+	}
+	if err := store.ReplaceAgentQuotaGroups("mbp", "antigravity:", []AgentQuotaObservation{{Source: "claude_local"}}); err == nil {
+		t.Fatal("source outside prefix accepted")
+	}
+}

@@ -26,7 +26,33 @@ type Config struct {
 	Sources         map[string]SourceConfig       `yaml:"sources"`
 	ClaudeQuota     config.LocalCodexOnlineConfig `yaml:"claude_quota"`
 	CodexQuota      config.LocalCodexOnlineConfig `yaml:"codex_quota"`
+	Antigravity     AntigravityConfig             `yaml:"antigravity"`
 	Log             config.LogConfig              `yaml:"log"`
+}
+
+// AntigravityConfig enables reporting Antigravity quota groups read with the
+// local Antigravity sign-in.
+type AntigravityConfig struct {
+	Enabled        bool   `yaml:"enabled"`
+	TokenPath      string `yaml:"token_path"`
+	TimeoutSeconds int    `yaml:"timeout_seconds"`
+	// ClientID / ClientSecret are Antigravity's installed-app OAuth client,
+	// needed to refresh an expired token while Antigravity is not running.
+	ClientID     string `yaml:"client_id"`
+	ClientSecret string `yaml:"client_secret"`
+	// GroupFilter keeps groups whose display name contains it (case-insensitive);
+	// empty keeps every group.
+	GroupFilter *string `yaml:"group_filter"`
+}
+
+func (c AntigravityConfig) includes(name string) bool {
+	if name == "" {
+		return false
+	}
+	if c.GroupFilter == nil || *c.GroupFilter == "" {
+		return true
+	}
+	return strings.Contains(strings.ToLower(name), strings.ToLower(*c.GroupFilter))
 }
 
 type ServerConfig struct {
@@ -141,6 +167,16 @@ func (c *Config) applyDefaults() {
 	}
 	if c.CodexQuota.TimeoutSeconds == 0 {
 		c.CodexQuota.TimeoutSeconds = defaultClaudeQuotaTime
+	}
+	if c.Antigravity.TokenPath == "" {
+		c.Antigravity.TokenPath = "~/.gemini/jetski-standalone-oauth-token"
+	}
+	if c.Antigravity.TimeoutSeconds == 0 {
+		c.Antigravity.TimeoutSeconds = defaultClaudeQuotaTime
+	}
+	if c.Antigravity.GroupFilter == nil {
+		filter := "gemini"
+		c.Antigravity.GroupFilter = &filter
 	}
 }
 

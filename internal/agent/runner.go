@@ -18,11 +18,16 @@ type quotaFetcher interface {
 	FetchRateLimits(context.Context) (localscan.RateLimits, bool, error)
 }
 
+type groupFetcher interface {
+	FetchGroups(context.Context) ([]QuotaGroup, error)
+}
+
 type Runner struct {
 	cfg           Config
 	logger        *slog.Logger
 	client        *Client
 	quotaFetchers map[string]quotaFetcher
+	antigravity   groupFetcher
 	now           func() time.Time
 }
 
@@ -39,6 +44,9 @@ func NewRunner(cfg Config, version string, logger *slog.Logger) *Runner {
 	}
 	if cfg.CodexQuota.Enabled {
 		runner.quotaFetchers["codex_local"] = collector.NewCodexOnlineQuotaClient(cfg.CodexQuota, logger)
+	}
+	if cfg.Antigravity.Enabled {
+		runner.antigravity = NewAntigravityQuotaClient(cfg.Antigravity)
 	}
 	return runner
 }
@@ -67,6 +75,12 @@ func (r *Runner) RunOnce(ctx context.Context) error {
 			continue
 		}
 		dirty = true
+	}
+	if r.antigravity != nil {
+		if err := r.runAntigravity(ctx); err != nil {
+			failures = append(failures, fmt.Sprintf("%s: %v", antigravitySource, err))
+			r.logger.Warn("agent antigravity push failed", "error", err)
+		}
 	}
 
 	if dirty {
@@ -147,6 +161,24 @@ func (r *Runner) runSource(ctx context.Context, state *stateFile, source string,
 		"quota_attached", quota != nil,
 		"push_duration", time.Since(pushStart),
 	)
+	return nil
+}
+
+// runAntigravity reports quota groups only; Antigravity keeps no local token
+// usage log. Nothing is pushed when the lookup fails, so the server keeps the
+// previous groups until they go stale.
+func (r *Runner) runAntigravity(ctx context.Context) error {
+	groups, err := r.antigravity.FetchGroups(ctx)
+	if err != nil {
+		return err
+	}
+	if len(groups) == 0 {
+		return fmt.Errorf("no quota groups matched")
+	}
+	if err := r.client.PushQuotaGroups(ctx, antigravitySource, groups); err != nil {
+		return err
+	}
+	r.logger.Info("agent antigravity push complete", "groups", len(groups))
 	return nil
 }
 

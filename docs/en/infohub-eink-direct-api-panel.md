@@ -19,7 +19,7 @@ This approach better fits the current requirements:
 1. No screenshots needed, no additional rendering service required
 2. The panel consumes the project API directly — the device side does not depend on browser rendering
 3. ESPHome only triggers an e-paper refresh when the payload changes, avoiding unnecessary repeated screen updates
-4. The device-side layout is a high-fidelity replica of the current HTML dashboard, maintaining the same visual structure with three overview cards, two tables, and a right-side alert column
+4. The default Codex layout shows daily / calendar-week tokens above quotas and reset times for two selected emails, without alerts. The original DeepSeek + Codex layout is also selectable
 
 ## Repository Files
 
@@ -39,13 +39,19 @@ curl "http://10.30.5.172:8080/dashboard/eink/device.json?token=YOUR_DASHBOARD_TO
 The device endpoint returns a compact structure optimized for ESPHome parsing, containing:
 
 - `updated_at`
-- `claude`
-- `sub2api`
-- `total`
-- `claude_rows`
-- `sub2api_rows`
-- `alerts`
-- `reset_hints`
+- `codex`: Codex-only daily usage
+- `template`: `trio` (default), `codex` or `deepseek-codex`
+- `platforms`: `trio` only — Claude Pro, Codex and Antigravity in that order, each with `name`, `today` (daily tokens), `usage_note` (week-to-date usage or a note) and `rows` (per account / model group `five_hour` / `week` quota, same shape as `codex_accounts`)
+- `codex_week`: week-to-date tokens, or `--` when unavailable
+- `daily_range` / `week_range`: usage date ranges
+- `codex_accounts`: email-allowlisted quotas in configured order; missing accounts retain unknown placeholders, and `reset_short` uses Asia/Shanghai
+- `codex_rows` / `codex_focus` / `alerts` / `reset_hints`: full legacy quota and alert data
+
+Legacy fields (`deepseek`, `deepseek_quota`, `total`) remain compatible but are not displayed or used to trigger refreshes in the `trio` / `codex` templates; `trio` refreshes only when `platforms` changes. After compiling and flashing the updated business YAML once, all three layouts can be selected through the response's `template` field.
+
+Set `dashboard.template` to `trio` (default), `codex` or `deepseek-codex` and restart the server to change the shared default. All dashboard endpoints accept a request-local `?template=codex` override; archived HTML and firmware for the older layouts live in `docs/panel-templates/codex/` and `docs/panel-templates/deepseek-codex/`. The `trio` device layout shows up to 3 platforms with 4 rows each. retain the token and refresh parameters. The web table displays the configured `dashboard.accounts` allowlist; the device displays its first two entries. Collector account targets must also include the desired emails (matched against account email, credentials.email, or extra.email). The supplied configs include both emails and retain the legacy Pro 20x target.
+
+Weekly usage uses explicit dates from Monday through today in Asia/Shanghai. User targets count only `/responses` tokens; account targets retain the same scope as daily account usage. Weekly items use `token_usage_product_week` and never enter daily totals. Existing snapshots without weekly items display `--` until the next collection.
 
 ## 2. ESPHome Device Direct Connection
 
@@ -57,7 +63,7 @@ Key points of this template:
 - `capture_response: true` to get the full JSON body on device
 - `max_response_buffer_size: 16384` to avoid the 1KB default buffer being too small
 - `update_interval: never` — the display does not refresh on a fixed cycle
-- If the HTTP response body is identical to the previous one, `component.update` is not triggered
+- Only visible Codex usage, quotas, and status changes trigger refreshes; collection timestamps and DeepSeek changes do not. Quota changes update immediately instead of waiting for a periodic full-payload synchronization
 - `GPIO3` is reserved as a physical manual refresh button
 - `GPIO4` also serves as the manual wake key for battery deep sleep
 - A `Force Sync` button is also exposed

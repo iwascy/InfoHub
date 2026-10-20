@@ -9,10 +9,15 @@ import (
 	"infohub/internal/store"
 )
 
-func NewRouter(dataStore store.Store, registry *collector.Registry, scheduler *scheduler.Scheduler, logger *slog.Logger, authToken string, dashboardToken string, ingestToken string, dashboardMockEnabled bool, dashboardSources DashboardSources) http.Handler {
+func NewRouter(dataStore store.Store, registry *collector.Registry, scheduler *scheduler.Scheduler, logger *slog.Logger, authToken string, dashboardToken string, ingestToken string, dashboardMockEnabled bool, dashboardSources DashboardSources, options ...DashboardOptions) http.Handler {
+	var dashboard DashboardOptions
+	if len(options) > 0 {
+		dashboard = options[0]
+	}
 	handler := NewHandlerWithOptions(dataStore, registry, scheduler, HandlerOptions{
 		DashboardMockEnabled: dashboardMockEnabled,
 		DashboardSources:     dashboardSources,
+		Dashboard:            dashboard,
 	})
 
 	mux := http.NewServeMux()

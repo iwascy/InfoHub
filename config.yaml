@@ -11,6 +11,10 @@ server:
   shutdown_timeout_seconds: 10
 
 dashboard:
+  template: "trio" # trio | codex | deepseek-codex
+  accounts:
+    - "cycyzg@gmail.com"
+    - "qqcyan@gmail.com"
   sources:
     sub2api: "sub2api"
 
@@ -59,6 +63,12 @@ collectors:
       - type: "account"
         name: "Pro 20x"
         match: "Pro 20x"
+        include_quota: true
+      - type: "account"
+        email: "cycyzg@gmail.com"
+        include_quota: true
+      - type: "account"
+        email: "qqcyan@gmail.com"
         include_quota: true
     auth:
       type: "login_json"
@@ -126,6 +136,27 @@ collectors:
       plan: "local"
       five_hour_msg_cap: 0
       weekly_msg_cap: 0
+
+  # Claude Pro quota + usage via CLIProxyAPI (CPA) management API.
+  # The CPA usage queue is drained destructively: enable this on ONE infohub
+  # instance only, and keep CPA's redis-usage-queue-retention-seconds above
+  # the drain interval (raising it to 3600 tolerates infohub restarts).
+  cpa:
+    enabled: ${CPA_ENABLED}
+    cron: "@every 30s"
+    timeout_seconds: 15
+    base_url: "${CPA_BASE_URL}"
+    management_key: "${CPA_MANAGEMENT_KEY}"
+    provider: "claude"
+    display_name: "Claude Pro"
+    # account: ""               # pin one CPA credential by email
+    quota_interval_seconds: 120 # upstream /api/oauth/usage lookups
+
+  # Antigravity quota groups pushed by infohub-agent (antigravity.enabled).
+  antigravity:
+    enabled: ${ANTIGRAVITY_ENABLED}
+    cron: "*/5 * * * *"
+    stale_seconds: 1800
 
 store:
   type: "${INFOHUB_STORE_TYPE}"

@@ -19,7 +19,7 @@
 1. 不走截图，不需要额外渲染服务
 2. 面板直接消费当前项目 API，设备端不依赖浏览器渲染
 3. ESPHome 只在 payload 变化时触发一次电子纸刷新，避免无意义的反复刷屏
-4. 设备侧版式按当前 HTML 看板做高保真复刻，保持三张概览卡片、双表格和右侧提醒栏的同一视觉结构
+4. 默认 Codex 版式为上方今日 / 本周 Token 用量，下方两个指定邮箱的额度及重置时间；不展示告警。旧版 DeepSeek + Codex 也可切换使用
 
 ## 当前仓库里对应的文件
 
@@ -39,13 +39,30 @@ curl "http://10.30.5.172:8080/dashboard/eink/device.json?token=YOUR_DASHBOARD_TO
 设备接口返回的是更适合 ESPHome 解析的紧凑结构，包含：
 
 - `updated_at`
-- `claude`
-- `sub2api`
-- `total`
-- `claude_rows`
-- `sub2api_rows`
-- `alerts`
-- `reset_hints`
+- `codex`：仅 Codex 今日用量
+- `template`：`trio`（默认）、`codex` 或 `deepseek-codex`
+- `platforms`：`trio` 模板专用，依次为 Claude Pro、Codex、Antigravity；每项含 `name`、`today`（今日 Token）、`usage_note`（本周用量或说明）和 `rows`（账号 / 模型分组的 `five_hour` / `week` 剩余额度，结构同 `codex_accounts`）
+- `codex_week`：本周累计 Token，缺失或查询失败时为 `--`
+- `daily_range` / `week_range`：用量统计区间
+- `codex_accounts`：按邮箱白名单顺序排列的额度；未匹配账号仍保留 `--` 占位，窗口的 `reset_short` 使用北京时间
+- `codex_rows` / `codex_focus` / `alerts` / `reset_hints`：兼容旧模板的完整额度和告警数据
+
+`deepseek`、`deepseek_quota`、`total` 等历史字段仍保留兼容。`trio` / `codex` 模板不展示、不因它们变化刷新；`trio` 只按 `platforms` 判断是否刷新。升级正式业务 YAML 后，固件可根据接口的 `template` 字段选择三套布局；首次升级仍需编译刷机。
+
+### 模板切换
+
+在 `config.yaml` 设置 `dashboard.template: trio`（默认）、`codex`（只有 Codex）或 `deepseek-codex`（最早的混合版），重启服务后，网页和设备默认使用同一模板。请求参数可覆盖默认值：
+
+```text
+/dashboard/eink?template=trio&token=YOUR_TOKEN
+/dashboard/eink?template=codex&token=YOUR_TOKEN
+/dashboard/eink?template=deepseek-codex&token=YOUR_TOKEN
+/dashboard/eink/device.json?template=deepseek-codex&token=YOUR_TOKEN
+```
+
+模板参数只影响当前请求，不修改全局配置。旧模板的 HTML 与固件存档见 `docs/panel-templates/codex/` 和 `docs/panel-templates/deepseek-codex/`。`trio` 设备版最多显示 3 个平台、每个平台 4 行。`dashboard.accounts` 控制 Codex 账号白名单；网页展示完整白名单，800×480 设备最多显示前两个账号。采集配置也必须包含这两个邮箱的 `account` target（通过账号 `email` / `credentials.email` / `extra.email` 精确匹配），否则显示 `--`。仓库默认配置已包含这两个 target，并保留旧版 Pro 20x 目标。
+
+周用量按 `Asia/Shanghai` 的周一至今查询；使用 `user_id` 时只累计 `/responses` 的 Token，使用 `account_id` 时沿用今日账号统计口径。周数据单独写入 `token_usage_product_week`，不会混入今日用量。历史快照未采集过周统计时显示 `--`，等下一次采集即可。
 
 ## 2. ESPHome 设备走直连接口
 
@@ -57,7 +74,7 @@ curl "http://10.30.5.172:8080/dashboard/eink/device.json?token=YOUR_DASHBOARD_TO
 - `capture_response: true`，在设备端拿到完整 JSON body
 - `max_response_buffer_size: 16384`，避免 1KB 默认缓冲过小
 - `update_interval: never`，显示器不做固定周期刷新
-- 只要 HTTP 返回 body 和上次完全一致，就不触发 `component.update`
+- 仅 Codex 用量、额度、状态等可见数据变化时触发刷新；采集时间戳和 DeepSeek 变化不触发刷新。额度变化立即更新，不再等待多次局刷后的整包同步
 - `GPIO3` 保留为实体手动刷新按钮
 - `GPIO4` 同时作为电池 deep sleep 的手动唤醒键
 - 还额外暴露了一个 `Force Sync` 按钮
