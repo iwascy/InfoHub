@@ -75,6 +75,14 @@ type IngestStore interface {
 	LatestAgentQuotaObservation(source string) (AgentQuotaObservation, bool, error)
 }
 
+// AgentQuotaGroupStore keeps several quota observations per machine under one
+// source prefix (e.g. "antigravity:Gemini Models"), for providers that report
+// independent quota groups instead of a single 5H/Week pair.
+type AgentQuotaGroupStore interface {
+	ReplaceAgentQuotaGroups(machine, sourcePrefix string, observations []AgentQuotaObservation) error
+	ListAgentQuotaObservations(sourcePrefix string) ([]AgentQuotaObservation, error)
+}
+
 func New(cfg config.StoreConfig) (Store, error) {
 	switch strings.ToLower(cfg.Type) {
 	case "memory":

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"infohub/internal/model"
@@ -609,6 +610,78 @@ func (s *SQLiteStore) LatestAgentQuotaObservation(source string) (AgentQuotaObse
 	}
 	obs.ObservedAt = time.Unix(observedAt, 0)
 	return obs, true, nil
+}
+
+func (s *SQLiteStore) ReplaceAgentQuotaGroups(machine, sourcePrefix string, observations []AgentQuotaObservation) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin quota groups tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec(`DELETE FROM agent_quota_observations WHERE machine = ? AND substr(source, 1, ?) = ?`, machine, len(sourcePrefix), sourcePrefix); err != nil {
+		return fmt.Errorf("delete agent quota groups: %w", err)
+	}
+	for _, obs := range observations {
+		if !strings.HasPrefix(obs.Source, sourcePrefix) {
+			return fmt.Errorf("quota group source %q lacks prefix %q", obs.Source, sourcePrefix)
+		}
+		observedAt := obs.ObservedAt
+		if observedAt.IsZero() {
+			observedAt = time.Now()
+		}
+		if _, err := tx.Exec(`
+			INSERT INTO agent_quota_observations(
+				machine, source,
+				quota_5h_used_percent, quota_5h_reset_at,
+				quota_week_used_percent, quota_week_reset_at,
+				observed_at, agent_version
+			)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		`, machine, obs.Source,
+			obs.Quota5hUsed, obs.Quota5hReset,
+			obs.QuotaWeekUsed, obs.QuotaWeekReset,
+			observedAt.Unix(), obs.AgentVersion); err != nil {
+			return fmt.Errorf("insert agent quota group: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit quota groups tx: %w", err)
+	}
+	return nil
+}
+
+func (s *SQLiteStore) ListAgentQuotaObservations(sourcePrefix string) ([]AgentQuotaObservation, error) {
+	rows, err := s.db.Query(`
+		SELECT machine, source,
+			quota_5h_used_percent, quota_5h_reset_at,
+			quota_week_used_percent, quota_week_reset_at,
+			observed_at, agent_version
+		FROM agent_quota_observations
+		WHERE substr(source, 1, ?) = ?
+		ORDER BY observed_at DESC, source ASC
+	`, len(sourcePrefix), sourcePrefix)
+	if err != nil {
+		return nil, fmt.Errorf("query agent quota groups: %w", err)
+	}
+	defer rows.Close()
+
+	var result []AgentQuotaObservation
+	for rows.Next() {
+		var (
+			obs        AgentQuotaObservation
+			observedAt int64
+		)
+		if err := rows.Scan(&obs.Machine, &obs.Source, &obs.Quota5hUsed, &obs.Quota5hReset, &obs.QuotaWeekUsed, &obs.QuotaWeekReset, &observedAt, &obs.AgentVersion); err != nil {
+			return nil, fmt.Errorf("scan agent quota group: %w", err)
+		}
+		obs.ObservedAt = time.Unix(observedAt, 0)
+		result = append(result, obs)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate agent quota groups: %w", err)
+	}
+	return result, nil
 }
 
 func (s *SQLiteStore) ListLocalUsageRecords(source string, start time.Time, end time.Time) ([]LocalUsageRecord, error) {

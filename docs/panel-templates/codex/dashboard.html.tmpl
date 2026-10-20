@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="refresh" content="{{.RefreshSeconds}}">
+  <title>Codex 用量与额度 | InfoHub</title>
+  <style>body { margin: 0; background: #ededed; } @media (min-width: 1001px) { body { padding-top: 32px; } }</style>
+<style>
+  #codex-dashboard { --codex-ink: #000; --codex-muted: #000; --codex-line: #999; color-scheme: light; color: var(--codex-ink); background: #fff; font-family: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif; font-size: 14px; font-weight: 700; line-height: 1.5; padding: 20px 24px 16px; min-height: 480px; width: 100%; max-width: 1000px; margin: 0 auto; display: flex; flex-direction: column; }
+  #codex-dashboard, #codex-dashboard * { box-sizing: border-box; letter-spacing: 0; }
+  #codex-dashboard h1, #codex-dashboard h2, #codex-dashboard p { margin: 0; }
+  #codex-dashboard .codex-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 45px; padding-bottom: 15px; border-bottom: 2px solid var(--codex-ink); }
+  #codex-dashboard .codex-brand { display: flex; align-items: center; gap: 14px; }
+  #codex-dashboard h1 { font-size: 28px; font-weight: 800; line-height: 1; }
+  #codex-dashboard .codex-brand span { border-left: 1px solid var(--codex-line); padding-left: 14px; color: var(--codex-muted); font-size: 13px; white-space: nowrap; }
+  #codex-dashboard .codex-updated { font-size: 12px; color: var(--codex-muted); text-align: right; }
+  #codex-dashboard .codex-usage { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 18px 0 14px; border-bottom: 1px solid var(--codex-ink); }
+  #codex-dashboard .codex-period { min-width: 0; padding-right: 24px; }
+  #codex-dashboard .codex-period + .codex-period { padding: 0 0 0 24px; border-left: 1px solid var(--codex-line); }
+  #codex-dashboard .codex-period h2 { font-size: 17px; font-weight: 800; }
+  #codex-dashboard .codex-number { display: flex; align-items: baseline; gap: 9px; flex-wrap: wrap; font-variant-numeric: tabular-nums; padding: 3px 0; }
+  #codex-dashboard .codex-number strong { font-size: 52px; line-height: 1.2; font-weight: 800; }
+  #codex-dashboard .codex-number span { color: var(--codex-muted); font-size: 12px; }
+  #codex-dashboard .codex-range { color: var(--codex-muted); font-size: 12px; }
+  #codex-dashboard .codex-section-title { display: flex; justify-content: space-between; align-items: center; min-height: 42px; gap: 12px; }
+  #codex-dashboard .codex-section-title h2 { font-size: 17px; font-weight: 800; }
+  #codex-dashboard .codex-section-title span { color: var(--codex-muted); font-size: 12px; }
+  #codex-dashboard .codex-table { width: 100%; border-collapse: collapse; table-layout: fixed; font-variant-numeric: tabular-nums; }
+  #codex-dashboard .codex-table th { text-align: left; padding: 0 0 7px; color: var(--codex-muted); font-size: 14px; font-weight: 700; }
+  #codex-dashboard .codex-table th:first-child { width: 39%; }
+  #codex-dashboard .codex-table th:not(:first-child) { width: 30.5%; padding-left: 20px; }
+  #codex-dashboard .codex-table td { padding: 10px 0 9px; border-top: 1px solid var(--codex-line); vertical-align: middle; }
+  #codex-dashboard .codex-table td:not(:first-child) { padding-left: 20px; }
+  #codex-dashboard .codex-email { font-size: 16px; font-weight: 800; overflow-wrap: anywhere; }
+  #codex-dashboard .codex-quota-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  #codex-dashboard .codex-quota-head strong { font-size: 24px; font-weight: 800; line-height: 1.15; }
+  #codex-dashboard .codex-mobile-label { display: none; }
+  #codex-dashboard .codex-track { flex: 1; height: 7px; max-width: 112px; border: 1px solid var(--codex-ink); padding: 1px; }
+  #codex-dashboard .codex-fill { display: block; height: 100%; background: var(--codex-ink); }
+  #codex-dashboard .codex-reset { margin-top: 5px; color: var(--codex-muted); font-size: 14px; overflow-wrap: anywhere; }
+  #codex-dashboard .codex-footer { margin-top: auto; border-top: 1px solid var(--codex-ink); padding-top: 11px; display: flex; justify-content: space-between; gap: 12px; color: var(--codex-muted); font-size: 14px; }
+  #codex-dashboard .codex-brand span, #codex-dashboard .codex-updated, #codex-dashboard .codex-number span, #codex-dashboard .codex-range, #codex-dashboard .codex-section-title span { font-size: 14px; }
+  @media (max-width: 560px) {
+    #codex-dashboard { padding: 18px; }
+    #codex-dashboard .codex-header { flex-wrap: wrap; gap: 12px; }
+    #codex-dashboard .codex-updated { text-align: left; }
+    #codex-dashboard .codex-period { padding-right: 14px; }
+    #codex-dashboard .codex-period + .codex-period { padding-left: 14px; }
+    #codex-dashboard .codex-number { gap: 3px 7px; }
+    #codex-dashboard .codex-number strong { font-size: 36px; }
+    #codex-dashboard .codex-number span { width: 100%; }
+    #codex-dashboard .codex-table thead { display: none; }
+    #codex-dashboard .codex-table tr { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 10px 0 12px; border-top: 1px solid var(--codex-line); }
+    #codex-dashboard .codex-table td { display: block; border: 0; padding: 0; }
+    #codex-dashboard .codex-table td:first-child { grid-column: 1 / -1; margin-bottom: 9px; }
+    #codex-dashboard .codex-table td:not(:first-child) { padding: 0; }
+    #codex-dashboard .codex-table td:nth-child(2) { padding-right: 14px; }
+    #codex-dashboard .codex-table td:nth-child(3) { padding-left: 14px; border-left: 1px solid var(--codex-line); }
+    #codex-dashboard .codex-mobile-label { display: block; font-size: 14px; color: var(--codex-muted); margin-bottom: 4px; }
+    #codex-dashboard .codex-quota-head strong { font-size: 20px; }
+    #codex-dashboard .codex-footer { margin-top: 8px; }
+  }
+  @media (max-width: 360px) {
+    #codex-dashboard .codex-number strong { font-size: 32px; }
+  }
+</style>
+
+</head>
+<body>
+<main id="codex-dashboard" aria-label="Codex 用量与账号额度">
+  <header class="codex-header">
+    <div class="codex-brand"><h1>Codex</h1><span>用量与额度</span></div>
+    <div class="codex-updated">更新 {{if .UpdatedAtUnix}}{{.UpdatedAt}}{{else}}--{{end}}</div>
+  </header>
+  <section class="codex-usage" aria-label="Codex Token 用量">
+    <div class="codex-period">
+      <h2>今日用量</h2>
+      <div class="codex-number"><strong>{{.Device.Codex.DisplayValue}}</strong><span>Tokens</span></div>
+      <p class="codex-range">{{.Device.DailyRange}}</p>
+    </div>
+    <div class="codex-period">
+      <h2>周用量</h2>
+      <div class="codex-number"><strong>{{.Device.CodexWeek.DisplayValue}}</strong><span>Tokens</span></div>
+      <p class="codex-range">{{.Device.WeekRange}}</p>
+    </div>
+  </section>
+  <section aria-label="指定账号剩余额度">
+    <div class="codex-section-title"><h2>账号额度</h2><span>{{len .Device.CodexAccounts}} 个账号</span></div>
+    <table class="codex-table">
+      <thead><tr><th scope="col">账号</th><th scope="col">5H 剩余额度</th><th scope="col">Week 剩余额度</th></tr></thead>
+      <tbody>
+        {{range .Device.CodexAccounts}}
+        <tr>
+          <td class="codex-email">{{.Account}}</td>
+          <td><span class="codex-mobile-label">5H 剩余额度</span><div class="codex-quota-head"><strong>{{.FiveHour.Text}}</strong><span class="codex-track" aria-hidden="true"><span class="codex-fill" style="width: {{.FiveHour.Percent}}%"></span></span></div><div class="codex-reset">重置 {{.FiveHour.ResetShort}}</div></td>
+          <td><span class="codex-mobile-label">Week 剩余额度</span><div class="codex-quota-head"><strong>{{.Week.Text}}</strong><span class="codex-track" aria-hidden="true"><span class="codex-fill" style="width: {{.Week.Percent}}%"></span></span></div><div class="codex-reset">重置 {{.Week.ResetShort}}</div></td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </section>
+  <footer class="codex-footer"><span>InfoHub</span><span>刷新 {{.RefreshSeconds}}s</span></footer>
+</main>
+
+</body>
+</html>

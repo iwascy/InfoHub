@@ -1,6 +1,7 @@
 package api
 
 import (
+	_ "embed"
 	"fmt"
 	"html/template"
 	"math"
@@ -19,263 +20,20 @@ const (
 	einkDashboardMaxRefreshSeconds     = 3600
 )
 
-var einkDashboardTmpl = template.Must(template.New("eink-dashboard").Parse(`<!doctype html>
-<html lang="zh-CN">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta http-equiv="refresh" content="{{.RefreshSeconds}}">
-  <title>InfoHub 墨水屏面板</title>
-  <style>
-    :root {
-      color-scheme: light;
-      --bg: #f1efe9;
-      --panel: #f8f7f2;
-      --ink: #111111;
-      --muted: #4b4b4b;
-      --line: #222222;
-      --soft-line: #9a9a9a;
-    }
-    * { box-sizing: border-box; }
-    html, body {
-      width: 100%;
-      height: 100%;
-      margin: 0;
-      padding: 0;
-      background: var(--bg);
-      color: var(--ink);
-      font-family: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
-    }
-    body {
-      overflow: hidden;
-      display: grid;
-      place-items: center;
-    }
-    .page {
-      container-type: size;
-      position: relative;
-      width: min(100vw, calc(100vh * 1.6666667));
-      height: min(100vh, calc(100vw * 0.6));
-      aspect-ratio: 800 / 480;
-      background: var(--bg);
-      overflow: hidden;
-    }
-    .frame, .header, .overview-card, .detail-panel, .quota-panel {
-      position: absolute;
-      background: var(--panel);
-      border: 0.1875vmin solid var(--line);
-    }
-    .frame { left: 1.125%; top: 1.875%; width: 97.75%; height: 96.25%; border-radius: 1.042%; }
-    .header {
-      left: 2.25%; top: 3.542%; width: 95.5%; height: 9.167%;
-      border-radius: 0.833%;
-      display: flex;
-      align-items: center;
-      padding: 0 1.25%;
-    }
-    .title { font-size: 4.583vmin; font-weight: 700; line-height: 1; }
-    .subtitle { margin-left: 1.5%; font-size: 2.5vmin; font-weight: 700; color: var(--muted); }
-    .refresh {
-      position: absolute;
-      left: 50%;
-      transform: translateX(-50%);
-      font-size: 3.125vmin;
-      font-weight: 600;
-      color: #444444;
-      white-space: nowrap;
-    }
-    .badge {
-      margin-left: auto;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      min-width: 10%;
-      height: 5vmin;
-      padding: 0 1.5%;
-      border-radius: 999px;
-      border: 0.125vmin solid var(--line);
-      font-size: 2.708vmin;
-      font-weight: 700;
-      white-space: nowrap;
-    }
-    .badge.solid { background: var(--ink); color: var(--panel); }
-    .overview-card { top: 14.583%; width: 31%; height: 28.75%; padding: 1.875% 1.5% 0; }
-    .overview-card.deepseek { left: 2.25%; }
-    .overview-card.codex { left: 34.5%; }
-    .overview-card.total { left: 66.75%; }
-    .overview-title, .panel-title {
-      font-size: 3.542vmin;
-      font-weight: 700;
-      line-height: 1;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-    .overview-value {
-      margin-top: 2.5%;
-      font-size: 10.625vmin;
-      font-weight: 700;
-      line-height: 1.08;
-      letter-spacing: 0;
-      white-space: nowrap;
-      overflow: hidden;
-    }
-    .overview-divider {
-      position: absolute;
-      left: 4.839%; right: 4.839%; bottom: 7.083vmin;
-      border-top: 0.125vmin solid var(--soft-line);
-    }
-    .overview-cost {
-      position: absolute;
-      left: 4.839%; bottom: 2.292vmin;
-      font-size: 2.917vmin;
-      font-weight: 700;
-      color: var(--muted);
-      white-space: nowrap;
-    }
-    .overview-meta { position: absolute; right: 4.839%; bottom: 2.292vmin; font-size: 2.708vmin; font-weight: 700; color: var(--muted); }
-    .detail-panel { left: 2.25%; top: 45%; width: 46%; height: 53.125%; padding: 2.083% 1.5%; }
-    .usage-row { position: relative; height: 16.25vmin; padding: 2.083vmin 1.25vmin 0; border-bottom: 0.125vmin solid var(--soft-line); }
-    .usage-row:last-child { border-bottom: 0; }
-    .usage-name { font-size: 3.333vmin; font-weight: 700; }
-    .usage-token { position: absolute; right: 1.25vmin; top: 1.667vmin; font-size: 4.167vmin; font-weight: 700; }
-    .usage-stats { margin-top: 2.083vmin; display: flex; gap: 3.333vmin; font-size: 2.708vmin; font-weight: 700; color: var(--muted); }
-    .quota-panel { left: 49.5%; top: 45%; width: 48.25%; height: 53.125%; padding: 2.083% 1.5%; }
-    .deepseek-quota {
-      margin-top: 2.083vmin;
-      padding-bottom: 2.083vmin;
-      border-bottom: 0.125vmin solid var(--soft-line);
-      display: grid;
-      grid-template-columns: 1fr auto;
-      gap: 0.833vmin 2.5vmin;
-      align-items: baseline;
-    }
-    .deepseek-quota strong { font-size: 3.125vmin; }
-    .deepseek-quota-value { font-size: 3.542vmin; font-weight: 700; }
-    .deepseek-quota-meta { grid-column: 1 / -1; font-size: 2.5vmin; font-weight: 700; color: var(--muted); }
-    .quota-reset {
-      margin-top: 1.667vmin;
-      font-size: 2.5vmin;
-      font-weight: 700;
-      color: var(--muted);
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-    .metric-row {
-      margin-top: 2.083vmin;
-      display: grid;
-      grid-template-columns: 1fr 0.125vmin 1fr;
-      column-gap: 2.5vmin;
-      align-items: start;
-    }
-    .metric { min-width: 0; }
-    .metric-head {
-      display: flex;
-      justify-content: space-between;
-      font-size: 3.333vmin;
-      font-weight: 700;
-      line-height: 1;
-    }
-    .progress-cell { margin-top: 2.292vmin; }
-    .progress-track {
-      width: 100%;
-      height: 1.875vmin;
-      border: 0.125vmin solid #bbbbbb;
-      border-radius: 999px;
-      overflow: hidden;
-    }
-    .progress-fill {
-      height: calc(100% - 0.416vmin);
-      margin: 0.208vmin;
-      border-radius: 999px;
-      background: #333333;
-    }
-    .metric-divider {
-      width: 0;
-      height: 8.333vmin;
-      background: var(--soft-line);
-      margin: 0 auto;
-    }
-    .quota-footer { position: absolute; left: 3.109%; right: 3.109%; bottom: 2.5vmin; padding-top: 2.083vmin; border-top: 0.125vmin solid var(--soft-line); display: flex; align-items: center; justify-content: space-between; }
-    .alert-text {
-      max-width: 72%; font-size: 2.708vmin;
-      font-weight: 700;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-    .refresh-cycle { font-size: 2.5vmin; font-weight: 700; color: var(--muted); white-space: nowrap; }
-  </style>
-</head>
-<body>
-  <main class="page">
-    <div class="frame"></div>
-    <header class="header">
-      <div class="title">InfoHub</div>
-      <div class="subtitle">SUB2API CONSUMPTION</div>
-      <div class="refresh">{{.UpdatedAt}}</div>
-      <div class="badge solid">状态 正常</div>
-    </header>
+//go:embed dashboard_codex.html
+var einkDashboardHTML string
 
-    <article class="overview-card deepseek">
-      <div class="overview-title">DeepSeek</div>
-      <div class="overview-value">{{.Device.DeepSeek.DisplayValue}}</div>
-      <div class="overview-divider"></div>
-      <div class="overview-cost">${{.Device.DeepSeek.Cost}}</div>
-      <div class="overview-meta">{{.Device.DeepSeek.Requests}} 次</div>
-    </article>
-    <article class="overview-card codex">
-      <div class="overview-title">Codex</div>
-      <div class="overview-value">{{.Device.Codex.DisplayValue}}</div>
-      <div class="overview-divider"></div>
-      <div class="overview-cost">${{.Device.Codex.Cost}}</div>
-      <div class="overview-meta">{{.Device.Codex.Requests}} 次</div>
-    </article>
-    <article class="overview-card total">
-      <div class="overview-title">合计</div>
-      <div class="overview-value">{{.Device.Total.DisplayValue}}</div>
-      <div class="overview-divider"></div>
-      <div class="overview-cost">${{.Device.Total.Cost}}</div>
-      <div class="overview-meta">{{.Device.Total.Requests}} 次</div>
-    </article>
+var einkDashboardTmpl = template.Must(template.New("eink-dashboard").Parse(einkDashboardHTML))
 
-    <section class="detail-panel">
-      <div class="panel-title">今日消耗明细</div>
-      <div class="usage-row">
-        <div class="usage-name">DeepSeek</div><div class="usage-token">{{.Device.DeepSeek.DisplayValue}}</div>
-        <div class="usage-stats"><span>请求 {{.Device.DeepSeek.Requests}}</span><span>成本 ${{.Device.DeepSeek.Cost}}</span></div>
-      </div>
-      <div class="usage-row">
-        <div class="usage-name">Codex</div><div class="usage-token">{{.Device.Codex.DisplayValue}}</div>
-        <div class="usage-stats"><span>请求 {{.Device.Codex.Requests}}</span><span>成本 ${{.Device.Codex.Cost}}</span></div>
-      </div>
-    </section>
+//go:embed dashboard_trio.html
+var einkTrioDashboardHTML string
 
-    <section class="quota-panel">
-      <div class="panel-title">额度概览</div>
-      <div class="deepseek-quota">
-        <strong>DeepSeek {{.Device.DeepSeekQuota.Label}}</strong>
-        <span class="deepseek-quota-value">{{.Device.DeepSeekQuota.Remaining}}</span>
-        <span class="deepseek-quota-meta">{{.Device.DeepSeekQuota.Detail}}</span>
-      </div>
-      <div class="quota-reset"><strong>Codex 订阅额度</strong> {{.Sub2APITable.FiveHourReset}}</div>
-      <div class="metric-row">
-        <div class="metric">
-          <div class="metric-head"><span>5H</span><span>{{.Sub2APITable.FocusRow.FiveHour.Text}}</span></div>
-          <div class="progress-cell"><div class="progress-track"><div class="progress-fill" style="width: {{.Sub2APITable.FocusRow.FiveHour.Percent}}%"></div></div></div>
-        </div>
-        <div class="metric-divider"></div>
-        <div class="metric">
-          <div class="metric-head"><span>Week</span><span>{{.Sub2APITable.FocusRow.Week.Text}}</span></div>
-          <div class="progress-cell"><div class="progress-track"><div class="progress-fill" style="width: {{.Sub2APITable.FocusRow.Week.Percent}}%"></div></div></div>
-        </div>
-      </div>
-      <div class="quota-footer"><div class="alert-text">{{if .AlertTitle}}{{.AlertTitle}} {{.AlertDetail}}{{else}}额度状态正常{{end}}</div><div class="refresh-cycle">刷新 {{.RefreshSeconds}}s</div></div>
-    </section>
-  </main>
-</body>
-</html>`))
+var einkTrioDashboardTmpl = template.Must(template.New("trio").Parse(einkTrioDashboardHTML))
+
+//go:embed dashboard_deepseek_codex.html
+var einkLegacyDashboardHTML string
+
+var einkLegacyDashboardTmpl = template.Must(template.New("deepseek-codex").Parse(einkLegacyDashboardHTML))
 
 type einkDashboardPage struct {
 	UpdatedAt      string             `json:"updated_at"`
@@ -310,6 +68,7 @@ type einkQuotaTable struct {
 
 type einkQuotaRow struct {
 	Account     string          `json:"account"`
+	Email       string          `json:"email,omitempty"`
 	FiveHour    einkPercentCell `json:"five_hour"`
 	Week        einkPercentCell `json:"week"`
 	Status      string          `json:"status"`
@@ -317,8 +76,10 @@ type einkQuotaRow struct {
 }
 
 type einkPercentCell struct {
-	Percent int    `json:"percent"`
-	Text    string `json:"text"`
+	Percent    int    `json:"percent"`
+	Text       string `json:"text"`
+	ResetAt    string `json:"reset_at"`
+	ResetShort string `json:"reset_short"`
 }
 
 type einkDeepSeekQuota struct {
@@ -344,20 +105,30 @@ type einkDeviceOverview struct {
 }
 
 type einkDevicePayload struct {
+	Template       string             `json:"template"`
 	UpdatedAt      string             `json:"updated_at"`
 	UpdatedAtUnix  int64              `json:"updated_at_unix"`
 	RefreshSeconds int                `json:"refresh_seconds"`
 	DeepSeek       einkDeviceOverview `json:"deepseek"`
 	DeepSeekQuota  einkDeepSeekQuota  `json:"deepseek_quota"`
 	Codex          einkDeviceOverview `json:"codex"`
+	CodexWeek      einkDeviceOverview `json:"codex_week"`
+	DailyRange     string             `json:"daily_range"`
+	WeekRange      string             `json:"week_range"`
+	CodexAccounts  []einkQuotaRow     `json:"codex_accounts"`
 	Total          einkDeviceOverview `json:"total"`
 	CodexRows      []einkQuotaRow     `json:"codex_rows"`
+	CodexFocus     einkQuotaRow       `json:"codex_focus"`
+	CodexStatus    string             `json:"codex_status"`
+	Platforms      []einkPlatform     `json:"platforms"`
+	CodexError     string             `json:"codex_error,omitempty"`
 	Alerts         []string           `json:"alerts"`
 	ResetHints     map[string]string  `json:"reset_hints"`
 }
 
 type quotaAccount struct {
 	Name      string
+	Email     string
 	FiveHour  quotaMetric
 	Week      quotaMetric
 	SourceKey string
@@ -373,62 +144,41 @@ type quotaMetric struct {
 }
 
 func (h *Handler) EInkDashboard(w http.ResponseWriter, r *http.Request) {
-	if h.dashboardMockEnabled {
-		page := buildMockEInkDashboardPage(dashboardRefreshSeconds(r))
-
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Header().Set("Cache-Control", "no-store")
-		if err := einkDashboardTmpl.Execute(w, page); err != nil {
-			writeDashboardError(w, http.StatusInternalServerError, err)
-			return
-		}
-		return
-	}
-
-	snapshots, err := h.store.GetAll()
+	page, err := h.dashboardPage(r)
 	if err != nil {
-		writeDashboardError(w, http.StatusInternalServerError, err)
+		writeDashboardError(w, dashboardErrorStatus(err), err)
 		return
 	}
-
-	page := buildEInkDashboardPage(snapshots, dashboardRefreshSeconds(r), h.dashboardSources)
-
+	tmpl := einkDashboardTmpl
+	switch page.Device.Template {
+	case "deepseek-codex":
+		tmpl = einkLegacyDashboardTmpl
+	case "trio":
+		tmpl = einkTrioDashboardTmpl
+	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
-	if err := einkDashboardTmpl.Execute(w, page); err != nil {
+	if err := tmpl.Execute(w, page); err != nil {
 		writeDashboardError(w, http.StatusInternalServerError, err)
-		return
 	}
 }
 
 func (h *Handler) EInkDashboardData(w http.ResponseWriter, r *http.Request) {
-	if h.dashboardMockEnabled {
-		writeJSON(w, http.StatusOK, buildMockEInkDashboardPage(dashboardRefreshSeconds(r)))
-		return
-	}
-
-	snapshots, err := h.store.GetAll()
+	page, err := h.dashboardPage(r)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		writeJSON(w, dashboardErrorStatus(err), map[string]string{"error": err.Error()})
 		return
 	}
-
-	writeJSON(w, http.StatusOK, buildEInkDashboardPage(snapshots, dashboardRefreshSeconds(r), h.dashboardSources))
+	writeJSON(w, http.StatusOK, page)
 }
 
 func (h *Handler) EInkDeviceData(w http.ResponseWriter, r *http.Request) {
-	if h.dashboardMockEnabled {
-		writeJSON(w, http.StatusOK, buildMockEInkDevicePayload(dashboardRefreshSeconds(r)))
-		return
-	}
-
-	snapshots, err := h.store.GetAll()
+	page, err := h.dashboardPage(r)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		writeJSON(w, dashboardErrorStatus(err), map[string]string{"error": err.Error()})
 		return
 	}
-
-	writeJSON(w, http.StatusOK, buildEInkDevicePayload(snapshots, dashboardRefreshSeconds(r), h.dashboardSources))
+	writeJSON(w, http.StatusOK, page.Device)
 }
 
 func buildEInkDashboardPage(snapshots map[string]model.SourceSnapshot, refreshSeconds int, sources DashboardSources) einkDashboardPage {
@@ -465,14 +215,28 @@ func buildEInkDevicePayload(snapshots map[string]model.SourceSnapshot, refreshSe
 	deepSeekOverview := buildProductDashboard(snapshot, "deepseek", "DeepSeek 今日消耗")
 	deepSeekQuota := buildDeepSeekQuota(snapshot.Items)
 	codexOverview := buildProductDashboard(snapshot, "codex", "Codex 今日消耗")
-	_, codexTable, _, codexAlerts := buildSourceDashboard("codex", dashboardOverviewTitle("codex"), snapshot)
+	quotaSource := "codex"
+	if sub2apiKey == "codex_local" {
+		quotaSource = sub2apiKey
+	}
+	_, codexTable, _, codexAlerts := buildSourceDashboard(quotaSource, dashboardOverviewTitle(quotaSource), snapshot)
+	codexDisplayValue := formatTokenMillions(codexOverview.TokenValue)
+	if codexOverview.Card.Value != "--" && codexOverview.TokenValue == 0 {
+		codexDisplayValue = "0.0M"
+	}
 
 	totalToken := deepSeekOverview.TokenValue + codexOverview.TokenValue
 	totalRequests := int(math.Round(deepSeekOverview.Requests + codexOverview.Requests))
 	totalCost := deepSeekOverview.Cost + codexOverview.Cost
 	alerts := mergeDashboardAlerts(codexAlerts)
+	dailyRange, weekRange := dashboardUsageRanges(snapshot.Items, updatedAtUnix)
 
 	return einkDevicePayload{
+		Template:       "codex",
+		CodexWeek:      buildCodexWeek(snapshot.Items),
+		DailyRange:     dailyRange,
+		WeekRange:      weekRange,
+		CodexAccounts:  filterCodexAccounts(codexTable.Rows, dashboardAccounts(nil)),
 		UpdatedAt:      formatHeaderTime(updatedAtUnix),
 		UpdatedAtUnix:  updatedAtUnix,
 		RefreshSeconds: refreshSeconds,
@@ -489,7 +253,7 @@ func buildEInkDevicePayload(snapshots map[string]model.SourceSnapshot, refreshSe
 		Codex: einkDeviceOverview{
 			Title:        codexOverview.Card.Title,
 			Value:        codexOverview.Card.Value,
-			DisplayValue: formatTokenMillions(codexOverview.TokenValue),
+			DisplayValue: codexDisplayValue,
 			Label:        codexOverview.Card.Label,
 			Requests:     int(math.Round(codexOverview.Requests)),
 			Cost:         fmt.Sprintf("%.2f", codexOverview.Cost),
@@ -506,8 +270,11 @@ func buildEInkDevicePayload(snapshots map[string]model.SourceSnapshot, refreshSe
 			Alerts:       len(alerts),
 			ValueNumeric: int64(math.Round(totalToken)),
 		},
-		CodexRows: codexTable.Rows,
-		Alerts:    alerts,
+		CodexRows:   codexTable.Rows,
+		CodexFocus:  codexTable.FocusRow,
+		CodexStatus: codexDashboardStatus(snapshot, codexTable),
+		CodexError:  codexTable.ErrorText,
+		Alerts:      alerts,
 		ResetHints: map[string]string{
 			"codex_five_hour": codexTable.FiveHourReset,
 			"codex_week":      codexTable.WeekReset,
@@ -515,12 +282,29 @@ func buildEInkDevicePayload(snapshots map[string]model.SourceSnapshot, refreshSe
 	}
 }
 
+func codexDashboardStatus(snapshot model.SourceSnapshot, table einkQuotaTable) string {
+	if strings.EqualFold(snapshot.Status, "error") {
+		if table.HasRows {
+			return "数据未更新"
+		}
+		return "采集失败"
+	}
+	if !table.HasRows {
+		return "等待数据"
+	}
+	if table.FocusRow.FiveHour.Text == "--" || table.FocusRow.Week.Text == "--" {
+		return "额度未知"
+	}
+	return table.FocusRow.Status
+}
+
 func buildMockEInkDashboardPage(refreshSeconds int) einkDashboardPage {
 	device := buildMockEInkDevicePayload(refreshSeconds)
+	alertTitle, alertDetail := splitDashboardAlert(device.Alerts)
 	codexTable := einkQuotaTable{
 		Title:         "Sub2API 账号额度",
 		Rows:          device.CodexRows,
-		FocusRow:      device.CodexRows[0],
+		FocusRow:      device.CodexFocus,
 		HasRows:       true,
 		FiveHourReset: device.ResetHints["codex_five_hour"],
 		WeekReset:     device.ResetHints["codex_week"],
@@ -552,18 +336,20 @@ func buildMockEInkDashboardPage(refreshSeconds int) einkDashboardPage {
 				Title: device.Total.Title,
 				Value: device.Total.Value,
 				Label: device.Total.Label,
-				Stats: []string{"总请求 693", "总成本 $68.92", "告警 0"},
+				Stats: []string{"总请求 693", "总成本 $68.92", fmt.Sprintf("告警 %d", len(device.Alerts))},
 				Icon:  dashboardCardIcon("total"),
 			},
 		},
 		Sub2APITable: codexTable,
-		Alerts:       []string{},
+		Alerts:       device.Alerts,
+		AlertTitle:   alertTitle,
+		AlertDetail:  alertDetail,
 		Device:       device,
 	}
 }
 
 func buildMockEInkDevicePayload(refreshSeconds int) einkDevicePayload {
-	return einkDevicePayload{
+	device := einkDevicePayload{
 		UpdatedAt:      "2026-04-24 10:30",
 		UpdatedAtUnix:  1776997800,
 		RefreshSeconds: refreshSeconds,
@@ -602,15 +388,15 @@ func buildMockEInkDevicePayload(refreshSeconds int) einkDevicePayload {
 		CodexRows: []einkQuotaRow{
 			{
 				Account:     "admin10010",
-				FiveHour:    einkPercentCell{Percent: 56, Text: "56%"},
-				Week:        einkPercentCell{Percent: 92, Text: "92%"},
+				FiveHour:    einkPercentCell{Percent: 56, Text: "56%", ResetAt: "2026-04-24 15:00"},
+				Week:        einkPercentCell{Percent: 92, Text: "92%", ResetAt: "2026-04-27 08:00"},
 				Status:      "关注",
 				StatusClass: "",
 			},
 			{
 				Account:     "admin10086",
-				FiveHour:    einkPercentCell{Percent: 18, Text: "18%"},
-				Week:        einkPercentCell{Percent: 64, Text: "64%"},
+				FiveHour:    einkPercentCell{Percent: 78, Text: "78%", ResetAt: "2026-04-24 16:00"},
+				Week:        einkPercentCell{Percent: 64, Text: "64%", ResetAt: "2026-04-28 08:00"},
 				Status:      "正常",
 				StatusClass: "",
 			},
@@ -621,6 +407,24 @@ func buildMockEInkDevicePayload(refreshSeconds int) einkDevicePayload {
 			"codex_week":      "Week 重置: 2026-04-27 08:00",
 		},
 	}
+	device.CodexFocus = pickFocusQuotaRow(device.CodexRows)
+	device.Template = "codex"
+	device.CodexWeek = einkDeviceOverview{Title: "Codex 本周用量", Value: "286,200,000", ValueNumeric: 286200000, DisplayValue: "286.2M", Label: "Tokens"}
+	device.DailyRange, device.WeekRange = "04/24 00:00 至今", "04/20 周一至今"
+	device.CodexRows[0].Email = "cycyzg@gmail.com"
+	device.CodexRows[1].Email = "qqcyan@gmail.com"
+	for i := range device.CodexRows {
+		for _, cell := range []*einkPercentCell{&device.CodexRows[i].FiveHour, &device.CodexRows[i].Week} {
+			if date, err := time.Parse("2006-01-02 15:04", cell.ResetAt); err == nil {
+				cell.ResetShort = date.Format("01/02 15:04")
+			}
+		}
+	}
+	device.CodexAccounts = filterCodexAccounts(device.CodexRows, dashboardAccounts(nil))
+	device.CodexStatus = device.CodexFocus.Status
+	device.Alerts = []string{"Codex admin10010：5H 余量仅 56%"}
+	device.Total.Alerts = len(device.Alerts)
+	return device
 }
 
 func configuredSnapshot(snapshots map[string]model.SourceSnapshot, key string) (string, model.SourceSnapshot) {
@@ -673,6 +477,7 @@ type sourceOverview struct {
 }
 
 func buildProductDashboard(snapshot model.SourceSnapshot, product string, title string) sourceOverview {
+	hasUsage := false
 	overview := sourceOverview{
 		Card: einkOverviewCard{
 			Kind:  product,
@@ -688,12 +493,19 @@ func buildProductDashboard(snapshot model.SourceSnapshot, product string, title 
 		if item.Category != "token_usage_product" || !strings.EqualFold(stringExtra(item.Extra, "product"), product) {
 			continue
 		}
-		overview.TokenValue += numericOrZero(item.Value)
+		value, err := strconv.ParseFloat(strings.ReplaceAll(strings.TrimSpace(item.Value), ",", ""), 64)
+		if err != nil || math.IsNaN(value) || math.IsInf(value, 0) || value < 0 {
+			continue
+		}
+		hasUsage = true
+		overview.TokenValue += value
 		overview.Requests += numericExtra(item.Extra, "daily_requests")
 		overview.Cost += numericExtra(item.Extra, "daily_cost")
 	}
 	if overview.TokenValue > 0 {
 		overview.Card.Value = formatPrimaryNumber(overview.TokenValue)
+	} else if hasUsage {
+		overview.Card.Value = "0"
 	}
 	overview.Card.Stats = []string{
 		"请求 " + formatCompactWhole(overview.Requests),
@@ -752,16 +564,19 @@ func buildSourceDashboard(sourceKey string, title string, snapshot model.SourceS
 		},
 	}
 	table := einkQuotaTable{
-		Title: dashboardTableTitle(sourceKey),
+		Title:    dashboardTableTitle(sourceKey),
+		FocusRow: emptyQuotaRow(),
 	}
 
-	if strings.EqualFold(snapshot.Status, "error") && len(snapshot.Items) == 0 {
+	if strings.EqualFold(snapshot.Status, "error") {
 		message := strings.TrimSpace(snapshot.Error)
 		if message == "" {
 			message = "最近一次采集失败"
 		}
 		table.ErrorText = message
-		return overview, table, 0, nil
+		if len(snapshot.Items) == 0 {
+			return overview, table, 0, nil
+		}
 	}
 
 	tokenItem, ok := findTokenUsageItem(snapshot.Items)
@@ -881,11 +696,12 @@ func buildQuotaAccounts(items []model.DataItem, sourceKey string) ([]quotaAccoun
 			continue
 		}
 
-		account, ok := byName[name]
+		key := nonEmpty(stringExtra(item.Extra, "account_id"), name)
+		account, ok := byName[key]
 		if !ok {
-			account = &quotaAccount{Name: name, SourceKey: sourceKey}
-			byName[name] = account
-			order = append(order, name)
+			account = &quotaAccount{Name: name, Email: stringExtra(item.Extra, "email"), SourceKey: sourceKey, FiveHour: quotaMetric{Unknown: true}, Week: quotaMetric{Unknown: true}}
+			byName[key] = account
+			order = append(order, key)
 		}
 
 		metric := quotaMetric{
@@ -921,6 +737,7 @@ func buildQuotaRow(account quotaAccount) einkQuotaRow {
 	status, className := quotaStatus(account)
 	return einkQuotaRow{
 		Account:     account.Name,
+		Email:       account.Email,
 		FiveHour:    quotaPercentCell(account.FiveHour),
 		Week:        quotaPercentCell(account.Week),
 		Status:      status,
@@ -930,11 +747,13 @@ func buildQuotaRow(account quotaAccount) einkQuotaRow {
 
 func quotaPercentCell(metric quotaMetric) einkPercentCell {
 	if metric.Unknown {
-		return einkPercentCell{Percent: 0, Text: "--"}
+		return einkPercentCell{Percent: 0, Text: "--", ResetAt: "--", ResetShort: "--"}
 	}
 	return einkPercentCell{
-		Percent: metric.RemainingPercent,
-		Text:    formatPercentText(metric.RemainingPercent),
+		Percent:    metric.RemainingPercent,
+		Text:       formatPercentText(metric.RemainingPercent),
+		ResetAt:    nonEmpty(formatResetFooter(metric.ResetAt), "--"),
+		ResetShort: shortQuotaReset(metric.ResetAt),
 	}
 }
 
@@ -957,8 +776,8 @@ func pickFocusQuotaRow(rows []einkQuotaRow) einkQuotaRow {
 func emptyQuotaRow() einkQuotaRow {
 	return einkQuotaRow{
 		Account:  "--",
-		FiveHour: einkPercentCell{Percent: 0, Text: "--"},
-		Week:     einkPercentCell{Percent: 0, Text: "--"},
+		FiveHour: einkPercentCell{Percent: 0, Text: "--", ResetAt: "--", ResetShort: "--"},
+		Week:     einkPercentCell{Percent: 0, Text: "--", ResetAt: "--", ResetShort: "--"},
 		Status:   "--",
 	}
 }

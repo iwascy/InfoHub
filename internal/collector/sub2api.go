@@ -22,6 +22,7 @@ type sub2apiAccountQuota struct {
 	ID           string
 	RawID        any
 	Name         string
+	Email        string
 	Used5h       float64
 	Reset5h      string
 	UsedWeek     float64
@@ -66,6 +67,8 @@ func (c *Sub2APICollector) Name() string {
 }
 
 func (c *Sub2APICollector) Collect(ctx context.Context) ([]model.DataItem, error) {
+	now := time.Now()
+	today, weekStart := model.UsageDates(now)
 	session, err := c.service.newSession(ctx)
 	if err != nil {
 		return nil, err
@@ -102,9 +105,10 @@ func (c *Sub2APICollector) Collect(ctx context.Context) ([]model.DataItem, error
 		items         []model.DataItem
 		names         []string
 	)
+	var weekTargets []struct{ scope, id string }
 
 	for _, target := range userTargets {
-		userStat, err := c.fetchUserTodayStats(ctx, session, target)
+		userStat, err := c.fetchUserTodayStats(ctx, session, target, today)
 		if err != nil {
 			return nil, err
 		}
@@ -117,6 +121,7 @@ func (c *Sub2APICollector) Collect(ctx context.Context) ([]model.DataItem, error
 			items = append(items, sub2apiProductTokenItem(c.Name(), userStat, product, productStat))
 		}
 		items = append(items, sub2apiDeepSeekQuotaItems(c.Name(), userStat)...)
+		weekTargets = append(weekTargets, struct{ scope, id string }{"user_id", userStat.UserID})
 	}
 
 	for _, account := range selectedAccounts {
@@ -132,11 +137,18 @@ func (c *Sub2APICollector) Collect(ctx context.Context) ([]model.DataItem, error
 			totalCost += stat.Cost
 			items = append(items, sub2apiAccountProductTokenItem(c.Name(), account, "codex", stat))
 		}
+		if len(c.targets) == 0 || account.IncludeUsage {
+			weekTargets = append(weekTargets, struct{ scope, id string }{"account_id", account.ID})
+		}
 
-		items = append(items,
+		quotaItems := []model.DataItem{
 			sub2apiQuotaItem(c.Name(), account.ID, account.Name, "5H", account.Used5h, account.Reset5h),
 			sub2apiQuotaItem(c.Name(), account.ID, account.Name, "Week", account.UsedWeek, account.ResetWeek),
-		)
+		}
+		for _, item := range quotaItems {
+			item.Extra["email"] = account.Email
+			items = append(items, item)
+		}
 	}
 
 	items = append([]model.DataItem{{
@@ -155,6 +167,17 @@ func (c *Sub2APICollector) Collect(ctx context.Context) ([]model.DataItem, error
 		FetchedAt: 0,
 	}}, items...)
 
+	for _, item := range items {
+		if item.Category == "token_usage_product" {
+			item.Extra["start_date"] = today
+			item.Extra["end_date"] = today
+		}
+	}
+	// Weekly failures must not prevent already-collected daily usage and quotas
+	// from being saved, including when several usage targets are configured.
+	for _, target := range weekTargets {
+		items = append(items, c.fetchCodexWeekUsage(ctx, session, target.scope, target.id, weekStart, today))
+	}
 	return withFetchedAt(items), nil
 }
 
@@ -209,6 +232,7 @@ func newSub2APIAccountQuota(account map[string]any) sub2apiAccountQuota {
 		ID:        accountID,
 		RawID:     rawID,
 		Name:      name,
+		Email:     firstStringValue(stringCandidate(account, "email"), stringCandidate(account, "credentials.email"), stringCandidate(account, "extra.email")),
 		Used5h:    floatPath(account, "extra.codex_5h_used_percent"),
 		Reset5h:   firstStringValue(stringCandidate(account, "extra.codex_5h_reset_at")),
 		UsedWeek:  floatPath(account, "extra.codex_7d_used_percent"),
@@ -300,6 +324,9 @@ func selectSub2APIAccounts(accounts []sub2apiAccountQuota, targets []config.Sub2
 }
 
 func sub2apiAccountMatchesTarget(account sub2apiAccountQuota, target config.Sub2APITarget) bool {
+	if target.Email != "" && (stringsEqualFold(account.Email, target.Email) || stringsEqualFold(account.Name, target.Email)) {
+		return true
+	}
 	if target.ID != "" && (stringsEqualFold(account.ID, target.ID) || stringsEqualFold(stringify(account.RawID), target.ID)) {
 		return true
 	}
@@ -322,7 +349,7 @@ func accountsWithUsageTarget(accounts []sub2apiAccountQuota) []sub2apiAccountQuo
 	return filtered
 }
 
-func (c *Sub2APICollector) fetchUserTodayStats(ctx context.Context, session *serviceSession, target config.Sub2APITarget) (sub2apiUserStat, error) {
+func (c *Sub2APICollector) fetchUserTodayStats(ctx context.Context, session *serviceSession, target config.Sub2APITarget, today string) (sub2apiUserStat, error) {
 	userID := strings.TrimSpace(target.ID)
 	email := strings.TrimSpace(target.Email)
 	name := strings.TrimSpace(target.Name)
@@ -347,7 +374,6 @@ func (c *Sub2APICollector) fetchUserTodayStats(ctx context.Context, session *ser
 		name = firstNonEmpty(email, target.Match, userID)
 	}
 
-	today := time.Now().Format("2006-01-02")
 	query := url.Values{
 		"user_id":    {userID},
 		"period":     {"today"},

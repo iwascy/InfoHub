@@ -55,7 +55,9 @@ func (s ServerConfig) EffectiveIngestToken() string {
 }
 
 type DashboardConfig struct {
-	Sources DashboardSourceConfig `yaml:"sources"`
+	Sources  DashboardSourceConfig `yaml:"sources"`
+	Template string                `yaml:"template"`
+	Accounts []string              `yaml:"accounts"`
 }
 
 type DashboardSourceConfig struct {
@@ -69,6 +71,52 @@ type CollectorsConfig struct {
 	Feishu      FeishuCollectorConfig `yaml:"feishu"`
 	ClaudeLocal LocalCollectorConfig  `yaml:"claude_local"`
 	CodexLocal  LocalCollectorConfig  `yaml:"codex_local"`
+	CPA         CPACollectorConfig    `yaml:"cpa"`
+	Antigravity AntigravityConfig     `yaml:"antigravity"`
+}
+
+// CPACollectorConfig reads a CLIProxyAPI (CPA) management API: Claude quota
+// through its api-call proxy and per-request usage drained from its usage
+// queue, which the collector caches in the sqlite store.
+type CPACollectorConfig struct {
+	Enabled        bool   `yaml:"enabled"`
+	Cron           string `yaml:"cron"`
+	TimeoutSeconds int    `yaml:"timeout_seconds"`
+	BaseURL        string `yaml:"base_url"`
+	ManagementKey  string `yaml:"management_key"`
+	// Provider selects the CPA credentials and usage records to report.
+	Provider string `yaml:"provider"`
+	// Account optionally pins one credential by email; empty uses the first active one.
+	Account string `yaml:"account"`
+	// DisplayName labels the account row on the dashboard.
+	DisplayName string `yaml:"display_name"`
+	// QuotaIntervalSeconds throttles upstream quota lookups; usage is drained every run.
+	QuotaIntervalSeconds int `yaml:"quota_interval_seconds"`
+}
+
+func (c CPACollectorConfig) Timeout() time.Duration {
+	return time.Duration(c.TimeoutSeconds) * time.Second
+}
+
+func (c CPACollectorConfig) QuotaInterval() time.Duration {
+	return time.Duration(c.QuotaIntervalSeconds) * time.Second
+}
+
+// AntigravityConfig serves Antigravity quota groups reported by infohub-agent.
+type AntigravityConfig struct {
+	Enabled        bool   `yaml:"enabled"`
+	Cron           string `yaml:"cron"`
+	TimeoutSeconds int    `yaml:"timeout_seconds"`
+	// StaleSeconds bounds how old an agent observation may be before it is hidden.
+	StaleSeconds int `yaml:"stale_seconds"`
+}
+
+func (c AntigravityConfig) Timeout() time.Duration {
+	return time.Duration(c.TimeoutSeconds) * time.Second
+}
+
+func (c AntigravityConfig) Stale() time.Duration {
+	return time.Duration(c.StaleSeconds) * time.Second
 }
 
 type HTTPCollectorConfig struct {
@@ -232,6 +280,16 @@ func (c Config) ScheduleConfig() ScheduleConfig {
 			Cron:    c.Collectors.CodexLocal.Cron,
 			Timeout: c.Collectors.CodexLocal.Timeout(),
 		},
+		"cpa": {
+			Enabled: c.Collectors.CPA.Enabled,
+			Cron:    c.Collectors.CPA.Cron,
+			Timeout: c.Collectors.CPA.Timeout(),
+		},
+		"antigravity": {
+			Enabled: c.Collectors.Antigravity.Enabled,
+			Cron:    c.Collectors.Antigravity.Cron,
+			Timeout: c.Collectors.Antigravity.Timeout(),
+		},
 	}
 }
 
@@ -272,6 +330,9 @@ func (c LocalCodexOnlineConfig) StaleAfter() time.Duration {
 }
 
 func (c *Config) applyDefaults() {
+	if c.Dashboard.Template == "" {
+		c.Dashboard.Template = "trio"
+	}
 	if c.Server.Port == 0 {
 		c.Server.Port = defaultPort
 	}
@@ -299,9 +360,26 @@ func (c *Config) applyDefaults() {
 	c.Collectors.Feishu.applyDefaults()
 	c.Collectors.ClaudeLocal.applyDefaults("claude_local")
 	c.Collectors.CodexLocal.applyDefaults("codex_local")
+	c.Collectors.CPA.applyDefaults()
+	c.Collectors.Antigravity.applyDefaults()
+}
+
+// DashboardTemplates lists the selectable dashboard layouts.
+var DashboardTemplates = []string{"trio", "codex", "deepseek-codex"}
+
+func IsDashboardTemplate(name string) bool {
+	for _, candidate := range DashboardTemplates {
+		if name == candidate {
+			return true
+		}
+	}
+	return false
 }
 
 func (c Config) validate() error {
+	if !IsDashboardTemplate(c.Dashboard.Template) {
+		return fmt.Errorf("unsupported dashboard template %q", c.Dashboard.Template)
+	}
 	switch strings.ToLower(c.Store.Type) {
 	case "memory", "sqlite":
 	default:
@@ -321,6 +399,15 @@ func (c Config) validate() error {
 		if c.Collectors.CodexLocal.Enabled && c.Collectors.CodexLocal.IsRemote() {
 			return fmt.Errorf("codex_local mode \"remote\" requires store.type \"sqlite\"")
 		}
+		if c.Collectors.CPA.Enabled {
+			return fmt.Errorf("cpa collector requires store.type \"sqlite\"")
+		}
+		if c.Collectors.Antigravity.Enabled {
+			return fmt.Errorf("antigravity collector requires store.type \"sqlite\"")
+		}
+	}
+	if c.Collectors.CPA.Enabled && (strings.TrimSpace(c.Collectors.CPA.BaseURL) == "" || strings.TrimSpace(c.Collectors.CPA.ManagementKey) == "") {
+		return fmt.Errorf("cpa collector requires base_url and management_key")
 	}
 
 	return nil
@@ -386,6 +473,40 @@ func (c *HTTPCollectorConfig) applyDefaults() {
 		if c.Auth.TokenPath == "" {
 			c.Auth.TokenPath = "token"
 		}
+	}
+}
+
+func (c *CPACollectorConfig) applyDefaults() {
+	if c.TimeoutSeconds == 0 {
+		c.TimeoutSeconds = defaultCollectorTimeout
+	}
+	if c.Cron == "" {
+		// CPA keeps usage records for redis-usage-queue-retention-seconds
+		// (default 60s), so drain well inside that window.
+		c.Cron = "@every 30s"
+	}
+	c.BaseURL = strings.TrimRight(strings.TrimSpace(c.BaseURL), "/")
+	c.ManagementKey = strings.TrimSpace(c.ManagementKey)
+	if c.Provider == "" {
+		c.Provider = "claude"
+	}
+	if c.DisplayName == "" {
+		c.DisplayName = "Claude Pro"
+	}
+	if c.QuotaIntervalSeconds == 0 {
+		c.QuotaIntervalSeconds = 120
+	}
+}
+
+func (c *AntigravityConfig) applyDefaults() {
+	if c.TimeoutSeconds == 0 {
+		c.TimeoutSeconds = defaultCollectorTimeout
+	}
+	if c.Cron == "" {
+		c.Cron = "*/5 * * * *"
+	}
+	if c.StaleSeconds == 0 {
+		c.StaleSeconds = defaultRemoteQuotaStale
 	}
 }
 

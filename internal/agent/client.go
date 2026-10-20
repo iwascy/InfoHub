@@ -66,6 +66,13 @@ type pushRequest struct {
 	ResetFiles   []string     `json:"reset_files,omitempty"`
 	Records      []pushRecord `json:"records"`
 	Quota        *pushQuota   `json:"quota,omitempty"`
+	QuotaGroups  []pushGroup  `json:"quota_groups,omitempty"`
+}
+
+type pushGroup struct {
+	Name     string           `json:"name"`
+	FiveHour *pushQuotaWindow `json:"five_hour,omitempty"`
+	Week     *pushQuotaWindow `json:"week,omitempty"`
 }
 
 // PushUsage uploads one batch. Any non-2xx response is an error so callers
@@ -109,6 +116,32 @@ func (c *Client) PushUsage(ctx context.Context, source string, resetFiles []stri
 		}
 	}
 
+	return c.post(ctx, request)
+}
+
+// PushQuotaGroups uploads independently limited quota pools (Antigravity);
+// the server replaces this machine's previous groups for the source.
+func (c *Client) PushQuotaGroups(ctx context.Context, source string, groups []QuotaGroup) error {
+	request := pushRequest{
+		MachineID:    c.machineID,
+		AgentVersion: c.version,
+		Source:       source,
+		Records:      []pushRecord{},
+	}
+	for _, group := range groups {
+		converted := pushGroup{Name: group.Name}
+		if group.FiveHour.OK {
+			converted.FiveHour = &pushQuotaWindow{UsedPercent: group.FiveHour.UsedPercent, ResetAt: group.FiveHour.ResetAt}
+		}
+		if group.Week.OK {
+			converted.Week = &pushQuotaWindow{UsedPercent: group.Week.UsedPercent, ResetAt: group.Week.ResetAt}
+		}
+		request.QuotaGroups = append(request.QuotaGroups, converted)
+	}
+	return c.post(ctx, request)
+}
+
+func (c *Client) post(ctx context.Context, request pushRequest) error {
 	payload, err := json.Marshal(request)
 	if err != nil {
 		return fmt.Errorf("encode push request: %w", err)

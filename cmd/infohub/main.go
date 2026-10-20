@@ -59,7 +59,7 @@ func main() {
 	handler := api.NewRouter(dataStore, registry, taskScheduler, logger, cfg.Server.AuthToken, cfg.Server.DashboardToken, cfg.Server.EffectiveIngestToken(), cfg.Server.MockEnabled, api.DashboardSources{
 		Sub2API: cfg.Dashboard.Sources.Sub2API,
 		Codex:   cfg.Dashboard.Sources.Codex,
-	})
+	}, api.DashboardOptions{Template: cfg.Dashboard.Template, Accounts: cfg.Dashboard.Accounts})
 	server := &http.Server{
 		Addr:              cfg.Server.Address(),
 		Handler:           handler,
@@ -122,6 +122,14 @@ func registerCollectors(registry *collector.Registry, logger *slog.Logger, cfg c
 			codexCollector.SetCodexOnlineQuotaClient(collector.NewCodexOnlineQuotaClient(cfg.Collectors.CodexLocal.Online, logger))
 		}
 		registry.Register(codexCollector)
+	}
+	if cfg.Collectors.CPA.Enabled {
+		usageStore, _ := dataStore.(collector.CPAUsageStore)
+		registry.Register(collector.NewCPACollector(cfg.Collectors.CPA, usageStore, logger))
+	}
+	if cfg.Collectors.Antigravity.Enabled {
+		groupStore, _ := dataStore.(store.AgentQuotaGroupStore)
+		registry.Register(collector.NewAntigravityCollector(cfg.Collectors.Antigravity, groupStore))
 	}
 }
 

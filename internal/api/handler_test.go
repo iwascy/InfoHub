@@ -31,6 +31,7 @@ func newTestDashboardHandler(dataStore store.Store) *Handler {
 		DashboardSources: DashboardSources{
 			Sub2API: "sub2api",
 		},
+		Dashboard: DashboardOptions{Template: "codex"},
 	})
 }
 
@@ -95,7 +96,13 @@ func TestHealthHandlerIncludesUnknownRegisteredCollector(t *testing.T) {
 
 func TestEInkDashboardRendersCustomLayout(t *testing.T) {
 	dataStore := store.NewMemoryStore()
-	mustSaveSnapshot(t, dataStore, "sub2api", sub2apiDashboardItems())
+	items := sub2apiDashboardItems()
+	for _, item := range items {
+		if item.Category == "quota" {
+			item.Extra["email"] = "cycyzg@gmail.com"
+		}
+	}
+	mustSaveSnapshot(t, dataStore, "sub2api", items)
 
 	handler := newTestDashboardHandler(dataStore)
 	req := httptest.NewRequest(http.MethodGet, "/dashboard/eink?refresh=600", nil)
@@ -108,26 +115,26 @@ func TestEInkDashboardRendersCustomLayout(t *testing.T) {
 
 	body := rec.Body.String()
 	for _, expected := range []string{
-		"InfoHub 墨水屏面板",
-		"SUB2API CONSUMPTION",
-		"DeepSeek",
-		"Codex 订阅额度",
-		">5H<",
-		">Week<",
-		"6.6M",
+		"Codex 用量与额度 | InfoHub",
+		"今日用量",
+		"周用量",
+		"5H 剩余额度",
+		"Week 剩余额度",
 		"54.5M",
-		"61.1M",
+		"cycyzg@gmail.com",
+		"qqcyan@gmail.com",
 		"刷新 600s",
 		"56%",
 		"92%",
-		"5H 余量仅 56%",
 	} {
 		if !strings.Contains(body, expected) {
 			t.Fatalf("dashboard body missing %q", expected)
 		}
 	}
-	if strings.Contains(body, "Claude") {
-		t.Fatalf("dashboard should not render Claude: %s", body)
+	for _, forbidden := range []string{"Claude", "DeepSeek", "deepseek", "合计", "61.1M", "6.6M", "vmin", "vw", "告警", "关注", "admin10010"} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("dashboard should not render %q", forbidden)
+		}
 	}
 }
 
@@ -715,8 +722,8 @@ func TestEInkDeviceDataReturnsMockPayloadWhenEnabled(t *testing.T) {
 	if payload.Codex.Value != "54,500,630" || payload.Codex.ValueNumeric != 54500630 {
 		t.Fatalf("unexpected mock codex payload: %+v", payload.Codex)
 	}
-	if payload.Total.Alerts != 0 || len(payload.Alerts) != 0 {
-		t.Fatalf("mock payload should not include alerts: %+v", payload)
+	if payload.Total.Alerts != 1 || len(payload.Alerts) != 1 {
+		t.Fatalf("mock payload should include the focus account warning: %+v", payload)
 	}
 	if len(payload.CodexRows) != 2 || payload.CodexRows[1].Account != "admin10086" || payload.CodexRows[1].Status != "正常" {
 		t.Fatalf("unexpected mock codex rows: %+v", payload.CodexRows)
