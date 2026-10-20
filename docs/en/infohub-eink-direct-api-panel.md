@@ -41,7 +41,7 @@ The device endpoint returns a compact structure optimized for ESPHome parsing, c
 - `updated_at`
 - `codex`: Codex-only daily usage
 - `template`: `trio` (default), `codex` or `deepseek-codex`
-- `platforms`: `trio` only — Claude Pro, Codex and Antigravity in that order, each with `name`, `today` (daily tokens; 「仅额度」 for Antigravity), `today_label`, `usage_note` (week-to-date usage or a note) and `rows` (per account / model group `five_hour` / `week` quota, same shape as `codex_accounts`; `not_applicable` is true when the group has no such window upstream)
+- `platforms`: `trio` only — Claude Pro, Codex and Antigravity in that order, each with `name`, `today` (daily tokens), `today_label`, `usage_note` (week-to-date usage) and `rows` (per account / model group `five_hour` / `week` quota, same shape as `codex_accounts` except `five_hour.reset_short` holds only the time of day; `not_applicable` is true when the group has no such window upstream)
 - `codex_week`: week-to-date tokens, or `--` when unavailable
 - `daily_range` / `week_range`: usage date ranges
 - `codex_accounts`: email-allowlisted quotas in configured order; missing accounts retain unknown placeholders, and `reset_short` uses Asia/Shanghai

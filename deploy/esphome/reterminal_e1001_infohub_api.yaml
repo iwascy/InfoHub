@@ -1615,16 +1615,14 @@ display:
         TrioPlatform platforms[3];
         int platform_count = 0;
         std::string updated_at = "--";
-        int refresh_seconds = 600;
         json::parse_json(id(last_payload_body), [&](JsonObject root) -> bool {
           if ((root["updated_at_unix"] | 0LL) > 0) updated_at = root["updated_at"] | "--";
-          refresh_seconds = root["refresh_seconds"] | 600;
           for (JsonVariant platform_value : root["platforms"].as<JsonArray>()) {
             if (platform_count >= 3) break;
             JsonObject platform = platform_value.as<JsonObject>();
             TrioPlatform &target = platforms[platform_count++];
             target.name = platform["name"] | "--";
-            target.today = platform["today"] | "--";
+            target.today = platform["today"] | "";
             target.today_label = platform["today_label"] | "";
             target.note = platform["usage_note"] | "--";
             for (JsonVariant row_value : platform["rows"].as<JsonArray>()) {
@@ -1643,88 +1641,91 @@ display:
           }
           return true;
         });
-        if (id(battery_sample_ready) && !id(external_power_connected)) {
-          refresh_seconds = id(low_battery_active)
-            ? ${low_battery_wake_interval_minutes} * 60
-            : ${battery_wake_interval_minutes} * 60;
-        }
 
         const int left = 22;
         const int right = 778;
         it.printf(left, 14, id(codex_font_header), "AI 额度");
-        int brand_w = 0, brand_h = 0;
-        measure_text(id(codex_font_header), "AI 额度", TextAlign::TOP_LEFT, brand_w, brand_h);
-        int divider_x = left + brand_w + 12;
-        it.line(divider_x, 18, divider_x, 42);
-        it.printf(divider_x + 12, 27, id(codex_font_small), "Claude · Codex · Antigravity");
-        it.printf(right, 27, id(codex_font_small), TextAlign::TOP_RIGHT, "%s", ("更新 " + updated_at).c_str());
-        it.filled_rectangle(left, 50, right - left, 2);
+        // Drop the year: "2026-04-24 10:30" -> "04-24 10:30".
+        std::string updated_short = updated_at.size() >= 16 ? updated_at.substr(5) : updated_at;
+        it.printf(right, 24, id(codex_font_small), TextAlign::TOP_RIGHT, "%s", ("更新 " + updated_short).c_str());
+        it.filled_rectangle(left, 52, right - left, 2);
 
-        const int column_w = (right - left) / 3;
+        // Usage strip: up to three platforms side by side.
+        int usage_index[3];
+        int usage_count = 0;
         for (int index = 0; index < platform_count; index++) {
-          int x = left + index * column_w + (index == 0 ? 0 : 14);
-          int max_w = column_w - (index == 0 ? 14 : 28);
-          if (index > 0) it.line(left + index * column_w, 60, left + index * column_w, 132);
-          it.printf(x, 58, id(codex_font_small), "%s", fit_text_width(id(codex_font_small), platforms[index].name, max_w).c_str());
-          std::string today = fit_text_width(id(trio_font_number), platforms[index].today, max_w - 80);
-          it.printf(x, 76, id(trio_font_number), "%s", today.c_str());
-          int number_w = 0, number_h = 0;
-          measure_text(id(trio_font_number), today, TextAlign::TOP_LEFT, number_w, number_h);
-          if (!platforms[index].today_label.empty()) {
-            it.printf(x + number_w + 6, 98, id(trio_font_xs), "%s", platforms[index].today_label.c_str());
-          }
-          it.printf(x, 118, id(trio_font_xs), "%s", fit_text_width(id(trio_font_xs), platforms[index].note, max_w).c_str());
+          if (!platforms[index].today.empty()) usage_index[usage_count++] = index;
         }
-        it.line(left, 142, right, 142);
+        if (usage_count > 0) {
+          const int column_w = (right - left) / usage_count;
+          for (int slot = 0; slot < usage_count; slot++) {
+            const TrioPlatform &platform = platforms[usage_index[slot]];
+            int x = left + slot * column_w + (slot == 0 ? 0 : 14);
+            int column_right = left + (slot + 1) * column_w - (slot == usage_count - 1 ? 0 : 14);
+            if (slot > 0) it.line(left + slot * column_w, 64, left + slot * column_w, 124);
+            it.printf(x, 62, id(codex_font_small), "%s", fit_text_width(id(codex_font_small), platform.name, column_right - x).c_str());
+            int week_w = 0, week_h = 0;
+            std::string week = fit_text_width(id(trio_font_xs), platform.note, (column_right - x) / 2);
+            measure_text(id(trio_font_xs), week, TextAlign::TOP_LEFT, week_w, week_h);
+            it.printf(column_right, 102, id(trio_font_xs), TextAlign::TOP_RIGHT, "%s", week.c_str());
+            int label_w = 0, label_h = 0;
+            if (!platform.today_label.empty()) {
+              measure_text(id(trio_font_xs), platform.today_label, TextAlign::TOP_LEFT, label_w, label_h);
+              label_w += 6;
+            }
+            std::string today = fit_text_width(id(trio_font_number), platform.today, column_right - x - week_w - label_w - 8);
+            it.printf(x, 80, id(trio_font_number), "%s", today.c_str());
+            int number_w = 0, number_h = 0;
+            measure_text(id(trio_font_number), today, TextAlign::TOP_LEFT, number_w, number_h);
+            if (!platform.today_label.empty()) {
+              it.printf(x + number_w + 6, 102, id(trio_font_xs), "%s", platform.today_label.c_str());
+            }
+          }
+        }
+        it.line(left, 134, right, 134);
 
-        const int account_x = 188;
-        const int five_x = 370;
-        const int week_x = 574;
-        it.printf(left, 150, id(trio_font_xs), "平台");
-        it.printf(account_x, 150, id(trio_font_xs), "账号 / 模型");
-        it.printf(five_x, 150, id(trio_font_xs), "5H 剩余");
-        it.printf(week_x, 150, id(trio_font_xs), "Week 剩余");
-        it.line(left, 172, right, 172);
+        const int account_x = 158;
+        const int five_x = 378;
+        const int week_x = 572;
+        it.printf(five_x, 142, id(trio_font_xs), "5H 剩余");
+        it.printf(week_x, 142, id(trio_font_xs), "本周剩余");
 
         int total_rows = 0;
         for (int index = 0; index < platform_count; index++) total_rows += platforms[index].row_count;
-        const int table_top = 172;
-        const int footer_y = 450;
-        int row_h = total_rows > 0 ? (footer_y - table_top) / total_rows : 56;
-        if (row_h > 60) row_h = 60;
+        const int table_top = 162;
+        const int table_bottom = 470;
+        int row_h = total_rows > 0 ? (table_bottom - table_top) / total_rows : 56;
+        if (row_h > 56) row_h = 56;
 
-        auto draw_trio_quota = [&](int x, int y, const std::string &text, int percent, const std::string &reset) {
-          it.printf(x, y, id(trio_font_percent), "%s", text.c_str());
-          Rect track{x + 76, y + 13, 88, 8};
+        // One line per cell: percent, bar, reset time.
+        auto draw_trio_quota = [&](int x, int center_y, const std::string &text, int percent, const std::string &reset) {
+          it.printf(x, center_y, id(trio_font_percent), TextAlign::CENTER_LEFT, "%s", text.c_str());
+          Rect track{x + 60, center_y - 4, 60, 8};
           draw_progress(track, percent, false);
-          it.printf(x, y + 30, id(trio_font_xs), "%s", fit_text_width(id(trio_font_xs), "重置 " + reset, week_x - five_x - 12).c_str());
+          it.printf(x + 128, center_y, id(trio_font_xs), TextAlign::CENTER_LEFT, "%s", reset.c_str());
         };
         int y = table_top;
         for (int index = 0; index < platform_count; index++) {
           for (int row_index = 0; row_index < platforms[index].row_count; row_index++) {
             const TrioRow &row = platforms[index].rows[row_index];
+            int center_y = y + row_h / 2;
             if (row_index == 0) {
-              if (y > table_top) it.line(left, y, right, y);
-              it.printf(left, y + 8, id(codex_font_body), "%s", fit_text_width(id(codex_font_body), platforms[index].name, account_x - left - 8).c_str());
+              it.line(left, y, right, y);
+              it.printf(left, center_y, id(codex_font_body), TextAlign::CENTER_LEFT, "%s", fit_text_width(id(codex_font_body), platforms[index].name, account_x - left - 8).c_str());
             } else {
               it.line(account_x, y, right, y);
             }
-            int content_y = y + (row_h - 48) / 2 + 1;
-            it.printf(account_x, y + row_h / 2, id(codex_font_body), TextAlign::CENTER_LEFT, "%s", fit_text_width(id(codex_font_body), row.account, five_x - account_x - 10).c_str());
+            it.printf(account_x, center_y, id(codex_font_body), TextAlign::CENTER_LEFT, "%s", fit_text_width(id(codex_font_body), row.account, five_x - account_x - 10).c_str());
             if (row.five_na) {
               // Weekly-only group: no 5H window upstream, so no bar or reset.
-              it.printf(five_x, y + row_h / 2, id(codex_font_small), TextAlign::CENTER_LEFT, "%s", row.five_text.c_str());
+              it.printf(five_x, center_y, id(codex_font_body), TextAlign::CENTER_LEFT, "%s", row.five_text.c_str());
             } else {
-              draw_trio_quota(five_x, content_y, row.five_text, row.five_percent, row.five_reset);
+              draw_trio_quota(five_x, center_y, row.five_text, row.five_percent, row.five_reset);
             }
-            draw_trio_quota(week_x, content_y, row.week_text, row.week_percent, row.week_reset);
+            draw_trio_quota(week_x, center_y, row.week_text, row.week_percent, row.week_reset);
             y += row_h;
           }
         }
-
-        it.line(left, footer_y, right, footer_y);
-        it.printf(left, 456, id(trio_font_xs), "InfoHub");
-        it.printf(right, 456, id(trio_font_xs), TextAlign::TOP_RIGHT, "刷新 %ds", refresh_seconds);
         return;
       }
 

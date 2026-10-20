@@ -150,21 +150,38 @@ func (h *Handler) IngestLocalUsage(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// ingestQuotaGroups replaces the machine's Antigravity quota groups; the
-// source carries no usage records.
+// ingestQuotaGroups replaces the machine's Antigravity quota groups and
+// records any per-day usage totals reported alongside them.
 func (h *Handler) ingestQuotaGroups(w http.ResponseWriter, r *http.Request, machine string, req ingestRequest) {
 	groupStore, ok := h.store.(store.AgentQuotaGroupStore)
 	if !ok {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "store does not support quota groups (sqlite required)"})
 		return
 	}
-	if len(req.Records) > 0 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "antigravity accepts quota_groups only"})
+	if len(req.Records) > maxIngestRecords {
+		writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": "too many records in one request"})
 		return
 	}
 	if len(req.QuotaGroups) > maxIngestQuotaGroups {
 		writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": "too many quota groups"})
 		return
+	}
+	records := make([]store.LocalUsageRecord, 0, len(req.Records))
+	for index, raw := range req.Records {
+		record, err := raw.toStoreRecord()
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error(), "record_index": index})
+			return
+		}
+		records = append(records, record)
+	}
+	if len(records) > 0 {
+		if ingestStore, ok := h.store.(store.IngestStore); ok {
+			if err := ingestStore.SaveIngestedUsage(machine, "antigravity", req.ResetFiles, records); err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+				return
+			}
+		}
 	}
 	now := time.Now()
 	observations := make([]store.AgentQuotaObservation, 0, len(req.QuotaGroups))
@@ -192,9 +209,11 @@ func (h *Handler) ingestQuotaGroups(w http.ResponseWriter, r *http.Request, mach
 		}
 		observations = append(observations, obs)
 	}
-	if err := groupStore.ReplaceAgentQuotaGroups(machine, collector.AntigravitySourcePrefix, observations); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
+	if len(observations) > 0 || len(records) == 0 {
+		if err := groupStore.ReplaceAgentQuotaGroups(machine, collector.AntigravitySourcePrefix, observations); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
 	}
 	refreshed := false
 	if h.scheduler != nil {
@@ -202,7 +221,7 @@ func (h *Handler) ingestQuotaGroups(w http.ResponseWriter, r *http.Request, mach
 		defer cancel()
 		refreshed = h.scheduler.TriggerNow(ctx, "antigravity") == nil
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "accepted": len(observations), "refreshed": refreshed})
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "accepted": len(observations) + len(records), "refreshed": refreshed})
 }
 
 func (raw ingestRecord) toStoreRecord() (store.LocalUsageRecord, error) {

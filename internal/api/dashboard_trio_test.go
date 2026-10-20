@@ -28,6 +28,8 @@ func trioSnapshots() map[string]model.SourceSnapshot {
 			{Category: "quota", Title: "账号 Claude Pro Week 额度", Extra: map[string]any{"window": "Week", "remaining_percent": 83, "email": "pro@example.com", "account_id": "cpa:c1"}},
 		}},
 		"antigravity": {Items: []model.DataItem{
+			{Category: "token_usage_product", Value: "287400000", FetchedAt: 1776766400, Extra: map[string]any{"product": "antigravity"}},
+			{Category: "token_usage_product_week", Value: "404600000", Extra: map[string]any{"product": "antigravity", "start_date": "2026-04-20", "end_date": "2026-04-21"}},
 			{Category: "quota", Title: "账号 Gemini 5H 额度", Extra: map[string]any{"window": "5H", "remaining_percent": 99, "account_id": "antigravity:Gemini Models"}},
 			{Category: "quota", Title: "账号 Gemini Week 额度", Extra: map[string]any{"window": "Week", "remaining_percent": 68, "account_id": "antigravity:Gemini Models"}},
 			{Category: "quota", Title: "账号 Gemini 4 Argon Week 额度", Extra: map[string]any{"window": "Week", "remaining_percent": 83, "account_id": "antigravity:Gemini 4 Argon"}},
@@ -44,13 +46,13 @@ func TestTrioPlatforms(t *testing.T) {
 		t.Fatalf("platforms = %d", len(platforms))
 	}
 	claude, codex, ag := platforms[0], platforms[1], platforms[2]
-	if claude.Today != "12.3M" || !strings.HasPrefix(claude.UsageNote, "本周 88.1M") || len(claude.Rows) != 1 || claude.Rows[0].Account != "pro@example.com" || claude.Rows[0].FiveHour.Text != "95%" {
+	if claude.Today != "12.3M" || claude.UsageNote != "本周 88.1M" || len(claude.Rows) != 1 || claude.Rows[0].Account != "pro@example.com" || claude.Rows[0].FiveHour.Text != "95%" {
 		t.Fatalf("claude = %+v", claude)
 	}
 	if codex.Today != "54.5M" || len(codex.Rows) != 2 || codex.Rows[0].FiveHour.Text != "56%" || codex.Rows[1].FiveHour.Text != "--" {
 		t.Fatalf("codex = %+v", codex)
 	}
-	if len(ag.Rows) != 2 || ag.Rows[0].Account != "Gemini" || ag.Rows[1].FiveHour.Text != "无 5H 限额" || !ag.Rows[1].FiveHour.NotApplicable || ag.Today != "仅额度" || ag.Rows[1].Week.Text != "83%" {
+	if len(ag.Rows) != 2 || ag.Rows[0].Account != "Gemini" || ag.Rows[1].FiveHour.Text != "不限" || !ag.Rows[1].FiveHour.NotApplicable || ag.Today != "287.4M" || ag.UsageNote != "本周 404.6M" || ag.Rows[1].Week.Text != "83%" {
 		t.Fatalf("antigravity = %+v", ag)
 	}
 }
@@ -60,7 +62,7 @@ func TestTrioPlaceholdersWithoutData(t *testing.T) {
 	if platforms[0].Today != "--" || platforms[0].Rows[0].Account != "Claude Pro" || platforms[0].Rows[0].Week.Text != "--" {
 		t.Fatalf("claude placeholder = %+v", platforms[0])
 	}
-	if platforms[2].Rows[0].Account != "Gemini" || platforms[2].Rows[0].FiveHour.Text != "--" {
+	if platforms[2].Today != "--" || platforms[2].Rows[0].Account != "Gemini" || platforms[2].Rows[0].FiveHour.Text != "--" {
 		t.Fatalf("antigravity placeholder = %+v", platforms[2])
 	}
 }
@@ -74,12 +76,12 @@ func TestTrioIsDefaultTemplate(t *testing.T) {
 	rec := httptest.NewRecorder()
 	h.EInkDashboard(rec, httptest.NewRequest(http.MethodGet, "/dashboard/eink", nil))
 	body := rec.Body.String()
-	for _, want := range []string{"AI 额度", "Claude Pro", "pro@example.com", "Gemini 4 Argon", "12.3M", "54.5M", "Google 不提供 Token 用量", "无 5H 限额", `rowspan="2"`} {
+	for _, want := range []string{"AI 额度", "Claude Pro", "pro@example.com", "Gemini 4 Argon", "12.3M", "54.5M", "不限", `rowspan="2"`} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("trio page missing %q", want)
 		}
 	}
-	for _, forbidden := range []string{"告警", "关注", "DeepSeek"} {
+	for _, forbidden := range []string{"告警", "关注", "DeepSeek", "仅额度", "重置", "刷新"} {
 		if strings.Contains(body, forbidden) {
 			t.Fatalf("trio page renders %q", forbidden)
 		}
@@ -115,5 +117,16 @@ func TestTrioMockPage(t *testing.T) {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("mock trio missing %q", want)
 		}
+	}
+}
+
+func TestTrioCompactRowsShortensFiveHourReset(t *testing.T) {
+	rows := []einkQuotaRow{{FiveHour: einkPercentCell{ResetShort: "04/24 21:20"}, Week: einkPercentCell{ResetShort: "04/26 15:00"}}, {FiveHour: einkPercentCell{ResetShort: "--"}}}
+	compact := trioCompactRows(rows)
+	if compact[0].FiveHour.ResetShort != "21:20" || compact[0].Week.ResetShort != "04/26 15:00" || compact[1].FiveHour.ResetShort != "--" {
+		t.Fatalf("compact = %+v", compact)
+	}
+	if rows[0].FiveHour.ResetShort != "04/24 21:20" {
+		t.Fatalf("input mutated: %+v", rows[0])
 	}
 }

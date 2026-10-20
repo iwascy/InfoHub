@@ -35,6 +35,7 @@ type Config struct {
 type AntigravityConfig struct {
 	Enabled        bool   `yaml:"enabled"`
 	TokenPath      string `yaml:"token_path"`
+	SwitchCLIPath  string `yaml:"switch_cli_path"`
 	TimeoutSeconds int    `yaml:"timeout_seconds"`
 	// ClientID / ClientSecret are Antigravity's installed-app OAuth client,
 	// needed to refresh an expired token while Antigravity is not running.
@@ -170,6 +171,9 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Antigravity.TokenPath == "" {
 		c.Antigravity.TokenPath = "~/.gemini/jetski-standalone-oauth-token"
+	}
+	if c.Antigravity.SwitchCLIPath == "" {
+		c.Antigravity.SwitchCLIPath = "/Applications/AntiGravity Switch.app/Contents/MacOS/agy-switch"
 	}
 	if c.Antigravity.TimeoutSeconds == 0 {
 		c.Antigravity.TimeoutSeconds = defaultClaudeQuotaTime

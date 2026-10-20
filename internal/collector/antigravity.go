@@ -65,6 +65,13 @@ func (c *AntigravityCollector) Collect(ctx context.Context) ([]model.DataItem, e
 	})
 
 	var items []model.DataItem
+	if usageStore, ok := c.store.(store.LocalUsageStateStore); ok {
+		usageItems, err := c.usageItems(usageStore, now)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, usageItems...)
+	}
 	for _, group := range groups {
 		obs := latest[group]
 		for _, window := range []struct {
@@ -107,4 +114,32 @@ func antigravityGroupLabel(group string) string {
 func resetPassed(resetAt string, now time.Time) bool {
 	parsed, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(resetAt))
 	return err == nil && !parsed.After(now)
+}
+
+func (c *AntigravityCollector) usageItems(usageStore store.LocalUsageStateStore, now time.Time) ([]model.DataItem, error) {
+	local := now.In(model.ShanghaiLocation)
+	today, weekStart := model.UsageDates(local)
+	dayStart, _ := time.ParseInLocation("2006-01-02", today, model.ShanghaiLocation)
+	weekBegin, _ := time.ParseInLocation("2006-01-02", weekStart, model.ShanghaiLocation)
+	records, err := usageStore.ListLocalUsageRecords(c.Name(), weekBegin, dayStart.AddDate(0, 0, 1))
+	if err != nil || len(records) == 0 {
+		return nil, err
+	}
+	var dayTokens, weekTokens float64
+	for _, record := range records {
+		weekTokens += record.Total
+		if !record.At.Before(dayStart) {
+			dayTokens += record.Total
+		}
+	}
+	return []model.DataItem{
+		{
+			Source: c.Name(), Category: "token_usage_product", Title: "Antigravity 今日 Token 用量", Value: formatFloat(dayTokens),
+			Extra: map[string]any{"scope": "product", "product": "antigravity", "start_date": today, "end_date": today, "timezone": "Asia/Shanghai"},
+		},
+		{
+			Source: c.Name(), Category: "token_usage_product_week", Title: "Antigravity 本周 Token 用量", Value: formatFloat(weekTokens),
+			Extra: map[string]any{"product": "antigravity", "start_date": weekStart, "end_date": today, "timezone": "Asia/Shanghai"},
+		},
+	}, nil
 }

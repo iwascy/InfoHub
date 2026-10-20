@@ -167,10 +167,17 @@ func TestIngestAntigravityQuotaGroups(t *testing.T) {
 		router.ServeHTTP(rec, req)
 		return rec
 	}
-	rec := post(map[string]any{"machine_id": "mbp", "source": "antigravity", "quota_groups": []map[string]any{
-		{"name": "Gemini Models", "five_hour": map[string]any{"used_percent": 1, "reset_at": "2026-10-20T13:31:08Z"}, "week": map[string]any{"used_percent": 32}},
-		{"name": "Gemini 4 Argon", "week": map[string]any{"used_percent": 17}},
-	}})
+	rec := post(map[string]any{
+		"machine_id": "mbp",
+		"source":     "antigravity",
+		"records": []map[string]any{
+			{"file_path": "agy-switch:2026-10-20", "at": "2026-10-20T00:00:00+08:00", "total": 287421179},
+		},
+		"quota_groups": []map[string]any{
+			{"name": "Gemini Models", "five_hour": map[string]any{"used_percent": 1, "reset_at": "2026-10-20T13:31:08Z"}, "week": map[string]any{"used_percent": 32}},
+			{"name": "Gemini 4 Argon", "week": map[string]any{"used_percent": 17}},
+		},
+	})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
 	}
@@ -186,7 +193,7 @@ func TestIngestAntigravityQuotaGroups(t *testing.T) {
 	for _, bad := range []map[string]any{
 		{"machine_id": "mbp", "source": "antigravity", "quota_groups": []map[string]any{{"name": ""}}},
 		{"machine_id": "mbp", "source": "antigravity", "quota_groups": []map[string]any{{"name": "a"}, {"name": "a"}}},
-		{"machine_id": "mbp", "source": "antigravity", "records": []map[string]any{{"file_path": "x", "at": "2026-10-20T00:00:00Z"}}},
+		{"machine_id": "mbp", "source": "antigravity", "records": []map[string]any{{"file_path": "", "at": "2026-10-20T00:00:00Z"}}},
 		{"machine_id": "mbp", "source": "other"},
 	} {
 		if rec := post(bad); rec.Code != http.StatusBadRequest {

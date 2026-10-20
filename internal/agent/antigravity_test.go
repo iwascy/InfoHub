@@ -76,3 +76,59 @@ func TestAntigravityQuotaClientRefreshesAndFilters(t *testing.T) {
 		t.Fatal("token file was rewritten")
 	}
 }
+
+func TestAntigravitySwitchStatsAndQuotaFallback(t *testing.T) {
+	now := time.Date(2026, 10, 20, 10, 0, 0, 0, time.UTC)
+	filter := "gemini"
+	client := NewAntigravityQuotaClient(AntigravityConfig{
+		TokenPath:   filepath.Join(t.TempDir(), "missing-token.json"),
+		GroupFilter: &filter,
+	})
+	client.now = func() time.Time { return now }
+	client.runSwitch = func(ctx context.Context, args ...string) ([]byte, error) {
+		switch args[0] {
+		case "stats":
+			return []byte(`{
+				"today":{"input_tokens":900,"output_tokens":100,"cached_tokens":2000,"total_tokens":3000},
+				"daily":[
+					{"date":"2026-09-01","total_tokens":999999},
+					{"date":"2026-10-19","input_tokens":400,"output_tokens":50,"cached_tokens":550,"total_tokens":1000},
+					{"date":"2026-10-20","input_tokens":800,"output_tokens":100,"cached_tokens":1600,"total_tokens":2500}
+				]
+			}`), nil
+		case "quota":
+			return []byte(`{
+				"schema_version":1,
+				"quota":{
+					"last_updated":1792490000,
+					"is_forbidden":false,
+					"quota_groups":[
+						{"display_name":"Gemini Models","buckets":[
+							{"window":"5h","remaining_fraction":0.9,"remaining_fraction_known":true,"reset_time":"2026-10-20T15:30:16Z"},
+							{"window":"weekly","remaining_fraction":0.7,"remaining_fraction_known":true,"reset_time":"2026-10-27T10:30:16Z"}
+						]},
+						{"display_name":"Claude and GPT models","buckets":[
+							{"window":"5h","remaining_fraction":1.0,"remaining_fraction_known":true}
+						]}
+					]
+				}
+			}`), nil
+		default:
+			t.Fatalf("unexpected args: %v", args)
+			return nil, nil
+		}
+	}
+
+	records, err := client.FetchUsageRecords(context.Background())
+	if err != nil || len(records) != 2 {
+		t.Fatalf("records = %+v, err = %v", records, err)
+	}
+	if records[0].FilePath != "agy-switch:2026-10-19" || records[0].Total != 1000 || records[1].FilePath != "agy-switch:2026-10-20" || records[1].Total != 3000 {
+		t.Fatalf("unexpected records: %+v", records)
+	}
+
+	groups, err := client.FetchGroups(context.Background())
+	if err != nil || len(groups) != 1 || groups[0].Name != "Gemini Models" || int(groups[0].FiveHour.UsedPercent+0.5) != 10 || int(groups[0].Week.UsedPercent+0.5) != 30 {
+		t.Fatalf("fallback groups = %+v, err = %v", groups, err)
+	}
+}
