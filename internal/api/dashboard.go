@@ -76,10 +76,13 @@ type einkQuotaRow struct {
 }
 
 type einkPercentCell struct {
-	Percent    int    `json:"percent"`
-	Text       string `json:"text"`
-	ResetAt    string `json:"reset_at"`
-	ResetShort string `json:"reset_short"`
+	Percent int `json:"percent"`
+	// NotApplicable marks a window the quota group does not have at all
+	// (e.g. Antigravity's weekly-only Gemini 4 Argon), as opposed to unknown.
+	NotApplicable bool   `json:"not_applicable,omitempty"`
+	Text          string `json:"text"`
+	ResetAt       string `json:"reset_at"`
+	ResetShort    string `json:"reset_short"`
 }
 
 type einkDeepSeekQuota struct {

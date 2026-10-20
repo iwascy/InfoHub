@@ -41,7 +41,7 @@ curl "http://10.30.5.172:8080/dashboard/eink/device.json?token=YOUR_DASHBOARD_TO
 - `updated_at`
 - `codex`：仅 Codex 今日用量
 - `template`：`trio`（默认）、`codex` 或 `deepseek-codex`
-- `platforms`：`trio` 模板专用，依次为 Claude Pro、Codex、Antigravity；每项含 `name`、`today`（今日 Token）、`usage_note`（本周用量或说明）和 `rows`（账号 / 模型分组的 `five_hour` / `week` 剩余额度，结构同 `codex_accounts`）
+- `platforms`：`trio` 模板专用，依次为 Claude Pro、Codex、Antigravity；每项含 `name`、`today`（今日 Token，Antigravity 为「仅额度」）、`today_label`、`usage_note`（本周用量或说明）和 `rows`（账号 / 模型分组的 `five_hour` / `week` 剩余额度，结构同 `codex_accounts`；上游没有该窗口时 `not_applicable` 为 true）
 - `codex_week`：本周累计 Token，缺失或查询失败时为 `--`
 - `daily_range` / `week_range`：用量统计区间
 - `codex_accounts`：按邮箱白名单顺序排列的额度；未匹配账号仍保留 `--` 占位，窗口的 `reset_short` 使用北京时间
