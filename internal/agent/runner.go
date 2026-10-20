@@ -22,6 +22,10 @@ type groupFetcher interface {
 	FetchGroups(context.Context) ([]QuotaGroup, error)
 }
 
+type groupUsageFetcher interface {
+	FetchUsageRecords(context.Context) ([]store.LocalUsageRecord, error)
+}
+
 type Runner struct {
 	cfg           Config
 	logger        *slog.Logger
@@ -164,22 +168,30 @@ func (r *Runner) runSource(ctx context.Context, state *stateFile, source string,
 	return nil
 }
 
-// runAntigravity reports quota groups only; Antigravity keeps no local token
-// usage log. Nothing is pushed when the lookup fails, so the server keeps the
-// previous groups until they go stale.
+// runAntigravity reports quota groups and optional local token usage read via
+// AntiGravity Switch. Nothing is pushed when both lookups fail, so the server
+// keeps the previous groups until they go stale.
 func (r *Runner) runAntigravity(ctx context.Context) error {
-	groups, err := r.antigravity.FetchGroups(ctx)
-	if err != nil {
+	groups, groupErr := r.antigravity.FetchGroups(ctx)
+	if groupErr == nil && len(groups) == 0 {
+		groupErr = fmt.Errorf("no quota groups matched")
+	}
+	var records []store.LocalUsageRecord
+	if fetcher, ok := r.antigravity.(groupUsageFetcher); ok {
+		var err error
+		records, err = fetcher.FetchUsageRecords(ctx)
+		if err != nil {
+			r.logger.Warn("agent antigravity usage fetch failed", "error", err)
+		}
+	}
+	if groupErr != nil && len(records) == 0 {
+		return groupErr
+	}
+	if err := r.client.PushQuotaGroups(ctx, antigravitySource, groups, records...); err != nil {
 		return err
 	}
-	if len(groups) == 0 {
-		return fmt.Errorf("no quota groups matched")
-	}
-	if err := r.client.PushQuotaGroups(ctx, antigravitySource, groups); err != nil {
-		return err
-	}
-	r.logger.Info("agent antigravity push complete", "groups", len(groups))
-	return nil
+	r.logger.Info("agent antigravity push complete", "groups", len(groups), "records", len(records))
+	return groupErr
 }
 
 func (r *Runner) fetchQuota(ctx context.Context, source string) *localscan.RateLimits {

@@ -7,76 +7,73 @@
   <title>AI 额度 | InfoHub</title>
 <style>
   body { margin: 0; background: #ededed; } @media (min-width: 1001px) { body { padding-top: 32px; } }
-  #trio { color-scheme: light; color: #000; background: #fff; font-family: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif; font-size: 14px; font-weight: 700; line-height: 1.35; padding: 14px 22px 10px; width: 100%; max-width: 1000px; min-height: 480px; margin: 0 auto; display: flex; flex-direction: column; }
+  #trio { color-scheme: light; color: #000; background: #fff; font-family: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif; font-size: 14px; font-weight: 700; line-height: 1.35; padding: 16px 24px 18px; width: 100%; max-width: 1000px; min-height: 480px; margin: 0 auto; display: flex; flex-direction: column; }
   #trio, #trio * { box-sizing: border-box; letter-spacing: 0; }
   #trio h1, #trio h2, #trio p { margin: 0; }
   #trio .trio-header { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding-bottom: 10px; border-bottom: 2px solid #000; }
-  #trio .trio-brand { display: flex; align-items: center; }
   #trio h1 { font-size: 26px; font-weight: 800; line-height: 1; white-space: nowrap; }
-  #trio .trio-brand span { border-left: 1px solid #999; margin-left: 12px; padding-left: 12px; }
-  #trio .trio-usage { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); padding: 8px 0; border-bottom: 1px solid #000; }
+  #trio .trio-usage { display: grid; grid-auto-columns: minmax(0, 1fr); grid-auto-flow: column; padding: 12px 0; border-bottom: 1px solid #000; }
   #trio .trio-usage > div { min-width: 0; padding: 0 14px; }
   #trio .trio-usage > div:first-child { padding-left: 0; }
+  #trio .trio-usage > div:last-child { padding-right: 0; }
   #trio .trio-usage > div + div { border-left: 1px solid #999; }
   #trio .trio-usage h2 { font-size: 15px; font-weight: 800; }
   #trio .trio-number { display: flex; align-items: baseline; gap: 6px; font-variant-numeric: tabular-nums; }
   #trio .trio-number strong { font-size: 32px; font-weight: 800; line-height: 1.15; }
-  #trio .trio-note { font-size: 13px; overflow-wrap: anywhere; }
-  #trio table { width: 100%; border-collapse: collapse; table-layout: fixed; font-variant-numeric: tabular-nums; margin-top: 4px; }
+  #trio .trio-week { margin-left: auto; font-size: 14px; white-space: nowrap; }
+  #trio table { width: 100%; border-collapse: collapse; table-layout: fixed; font-variant-numeric: tabular-nums; margin-top: 6px; }
   #trio th { text-align: left; font-size: 13px; padding: 4px 0; }
-  #trio th:nth-child(1) { width: 22%; } #trio th:nth-child(2) { width: 24%; }
-  #trio td { border-top: 1px solid #999; padding: 5px 0; vertical-align: middle; }
-  #trio tr.trio-group td { border-top-color: #000; }
-  #trio .trio-platform { font-size: 15px; font-weight: 800; vertical-align: top; padding-top: 9px; }
-  #trio .trio-account { font-size: 15px; font-weight: 800; overflow-wrap: anywhere; padding-right: 8px; }
+  #trio th:nth-child(1) { width: 18%; } #trio th:nth-child(2) { width: 30%; } #trio th:nth-child(3) { width: 24%; }
+  #trio td { border-top: 1px solid #ccc; padding: 10px 16px 10px 0; vertical-align: middle; }
+  #trio tr.trio-group td { border-top: 1px solid #000; }
+  #trio .trio-platform { font-size: 15px; font-weight: 800; vertical-align: top; padding-top: 12px; }
+  #trio .trio-account { font-size: 15px; overflow-wrap: anywhere; padding-right: 8px; }
   #trio .trio-quota { display: flex; align-items: center; gap: 8px; }
-  #trio .trio-quota strong { font-size: 21px; font-weight: 800; width: 58px; }
-  #trio .trio-track { flex: 1; max-width: 96px; height: 8px; border: 1px solid #000; padding: 1px; }
+  #trio .trio-quota strong { font-size: 21px; font-weight: 800; flex: 0 0 58px; }
+  #trio .trio-track { flex: 0 0 60px; height: 8px; border: 1px solid #000; padding: 1px; }
   #trio .trio-fill { display: block; height: 100%; background: #000; }
-  #trio .trio-reset { font-size: 12px; }
-  #trio .trio-na { font-size: 14px; }
-  #trio .trio-footer { margin-top: auto; border-top: 1px solid #000; padding-top: 6px; display: flex; justify-content: space-between; font-size: 13px; }
+  #trio .trio-reset { font-size: 12px; white-space: nowrap; }
+  #trio .trio-na { font-size: 15px; }
   @media (max-width: 560px) {
     #trio { padding: 14px; }
-    #trio .trio-header { flex-wrap: wrap; }
-    #trio .trio-usage { grid-template-columns: 1fr; gap: 8px; }
+    #trio .trio-usage { grid-auto-flow: row; gap: 8px; }
     #trio .trio-usage > div, #trio .trio-usage > div:first-child { padding: 0; border-left: 0; }
     #trio .trio-number strong { font-size: 26px; }
     #trio th:nth-child(1), #trio td.trio-platform { display: none; }
     #trio th:nth-child(2) { width: 34%; }
-    #trio .trio-quota strong { font-size: 17px; width: 44px; }
+    #trio .trio-quota { flex-wrap: wrap; gap: 0 6px; }
+    #trio .trio-quota strong { font-size: 17px; width: auto; }
+    #trio .trio-track { display: none; }
   }
 </style>
 </head>
 <body>
 <main id="trio" aria-label="Claude、Codex、Antigravity 用量与额度">
   <header class="trio-header">
-    <div class="trio-brand"><h1>AI 额度</h1><span>Claude · Codex · Antigravity</span></div>
-    <div>更新 {{if .UpdatedAtUnix}}{{.UpdatedAt}}{{else}}--{{end}}</div>
+    <h1>AI 额度</h1>
+    <div>更新 {{if .UpdatedAtUnix}}{{slice .UpdatedAt 5}}{{else}}--{{end}}</div>
   </header>
   <section class="trio-usage" aria-label="Token 用量">
-    {{range .Device.Platforms}}
+    {{range .Device.Platforms}}{{if .Today}}
     <div>
       <h2>{{.Name}}</h2>
-      <div class="trio-number"><strong>{{.Today}}</strong>{{if .TodayLabel}}<span>{{.TodayLabel}}</span>{{end}}</div>
-      <p class="trio-note">{{.UsageNote}}</p>
+      <div class="trio-number"><strong>{{.Today}}</strong>{{if .TodayLabel}}<span>{{.TodayLabel}}</span>{{end}}<span class="trio-week">{{.UsageNote}}</span></div>
     </div>
-    {{end}}
+    {{end}}{{end}}
   </section>
   <table aria-label="剩余额度">
-    <thead><tr><th scope="col">平台</th><th scope="col">账号 / 模型</th><th scope="col">5H 剩余</th><th scope="col">Week 剩余</th></tr></thead>
+    <thead><tr><th scope="col"></th><th scope="col"></th><th scope="col">5H 剩余</th><th scope="col">本周剩余</th></tr></thead>
     <tbody>
       {{range $platform := .Device.Platforms}}{{range $index, $row := $platform.Rows}}
       <tr{{if eq $index 0}} class="trio-group"{{end}}>
         {{if eq $index 0}}<td class="trio-platform" rowspan="{{len $platform.Rows}}">{{$platform.Name}}</td>{{end}}
         <td class="trio-account">{{$row.Account}}</td>
-        <td>{{if $row.FiveHour.NotApplicable}}<div class="trio-na">{{$row.FiveHour.Text}}</div>{{else}}<div class="trio-quota"><strong>{{$row.FiveHour.Text}}</strong><span class="trio-track" aria-hidden="true"><span class="trio-fill" style="width: {{$row.FiveHour.Percent}}%"></span></span></div><div class="trio-reset">重置 {{$row.FiveHour.ResetShort}}</div>{{end}}</td>
-        <td><div class="trio-quota"><strong>{{$row.Week.Text}}</strong><span class="trio-track" aria-hidden="true"><span class="trio-fill" style="width: {{$row.Week.Percent}}%"></span></span></div><div class="trio-reset">重置 {{$row.Week.ResetShort}}</div></td>
+        <td>{{if $row.FiveHour.NotApplicable}}<span class="trio-na">{{$row.FiveHour.Text}}</span>{{else}}<div class="trio-quota"><strong>{{$row.FiveHour.Text}}</strong><span class="trio-track" aria-hidden="true"><span class="trio-fill" style="width: {{$row.FiveHour.Percent}}%"></span></span><span class="trio-reset">{{$row.FiveHour.ResetShort}}</span></div>{{end}}</td>
+        <td><div class="trio-quota"><strong>{{$row.Week.Text}}</strong><span class="trio-track" aria-hidden="true"><span class="trio-fill" style="width: {{$row.Week.Percent}}%"></span></span><span class="trio-reset">{{$row.Week.ResetShort}}</span></div></td>
       </tr>
       {{end}}{{end}}
     </tbody>
   </table>
-  <footer class="trio-footer"><span>InfoHub</span><span>刷新 {{.RefreshSeconds}}s</span></footer>
 </main>
 </body>
 </html>

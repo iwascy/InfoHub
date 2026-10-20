@@ -57,6 +57,7 @@ antigravity:
   client_id: "${ANTIGRAVITY_OAUTH_CLIENT_ID}"
   client_secret: "${ANTIGRAVITY_OAUTH_CLIENT_SECRET}"
   # token_path: "~/.gemini/jetski-standalone-oauth-token"
+  # switch_cli_path: "/Applications/AntiGravity Switch.app/Contents/MacOS/agy-switch"
   # group_filter: "gemini"   # 只保留名称包含该词的分组；"" 表示全部
   # timeout_seconds: 8
 

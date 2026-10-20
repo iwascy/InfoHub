@@ -83,25 +83,7 @@ func (c *Client) PushUsage(ctx context.Context, source string, resetFiles []stri
 		AgentVersion: c.version,
 		Source:       source,
 		ResetFiles:   resetFiles,
-		Records:      make([]pushRecord, 0, len(records)),
-	}
-	for _, record := range records {
-		request.Records = append(request.Records, pushRecord{
-			FilePath:       record.FilePath,
-			ByteOffset:     record.ByteOffset,
-			At:             record.At.UTC().Format(time.RFC3339Nano),
-			Model:          record.Model,
-			Input:          record.Input,
-			Output:         record.Output,
-			CacheRead:      record.CacheRead,
-			CacheCreation:  record.CacheCreation,
-			Reasoning:      record.Reasoning,
-			Total:          record.Total,
-			Quota5hUsed:    record.Quota5hUsed,
-			Quota5hReset:   record.Quota5hReset,
-			QuotaWeekUsed:  record.QuotaWeekUsed,
-			QuotaWeekReset: record.QuotaWeekReset,
-		})
+		Records:      toPushRecords(records),
 	}
 	if quota != nil {
 		converted := pushQuota{}
@@ -119,14 +101,38 @@ func (c *Client) PushUsage(ctx context.Context, source string, resetFiles []stri
 	return c.post(ctx, request)
 }
 
-// PushQuotaGroups uploads independently limited quota pools (Antigravity);
-// the server replaces this machine's previous groups for the source.
-func (c *Client) PushQuotaGroups(ctx context.Context, source string, groups []QuotaGroup) error {
+func toPushRecords(records []store.LocalUsageRecord) []pushRecord {
+	converted := make([]pushRecord, 0, len(records))
+	for _, record := range records {
+		converted = append(converted, pushRecord{
+			FilePath:       record.FilePath,
+			ByteOffset:     record.ByteOffset,
+			At:             record.At.UTC().Format(time.RFC3339Nano),
+			Model:          record.Model,
+			Input:          record.Input,
+			Output:         record.Output,
+			CacheRead:      record.CacheRead,
+			CacheCreation:  record.CacheCreation,
+			Reasoning:      record.Reasoning,
+			Total:          record.Total,
+			Quota5hUsed:    record.Quota5hUsed,
+			Quota5hReset:   record.Quota5hReset,
+			QuotaWeekUsed:  record.QuotaWeekUsed,
+			QuotaWeekReset: record.QuotaWeekReset,
+		})
+	}
+	return converted
+}
+
+// PushQuotaGroups uploads independently limited quota pools (Antigravity) and
+// any local usage records read from AntiGravity Switch; the server replaces
+// this machine's previous groups for the source.
+func (c *Client) PushQuotaGroups(ctx context.Context, source string, groups []QuotaGroup, records ...store.LocalUsageRecord) error {
 	request := pushRequest{
 		MachineID:    c.machineID,
 		AgentVersion: c.version,
 		Source:       source,
-		Records:      []pushRecord{},
+		Records:      toPushRecords(records),
 	}
 	for _, group := range groups {
 		converted := pushGroup{Name: group.Name}

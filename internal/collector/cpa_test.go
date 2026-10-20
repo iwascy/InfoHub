@@ -169,6 +169,12 @@ func TestAntigravityCollectorGroups(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	if err := dataStore.SaveIngestedUsage("mbp", "antigravity", nil, []store.LocalUsageRecord{
+		{FilePath: "agy-switch:2026-10-19", At: time.Date(2026, 10, 19, 0, 0, 0, 0, model.ShanghaiLocation), Total: 117100000, Quota5hUsed: -1, QuotaWeekUsed: -1},
+		{FilePath: "agy-switch:2026-10-20", At: time.Date(2026, 10, 20, 0, 0, 0, 0, model.ShanghaiLocation), Total: 287400000, Quota5hUsed: -1, QuotaWeekUsed: -1},
+	}); err != nil {
+		t.Fatal(err)
+	}
 	collector := NewAntigravityCollector(config.AntigravityConfig{StaleSeconds: 1800}, dataStore)
 	collector.now = func() time.Time { return now }
 	items, err := collector.Collect(context.Background())
@@ -179,8 +185,8 @@ func TestAntigravityCollectorGroups(t *testing.T) {
 	for _, item := range items {
 		got = append(got, item.Title+"="+item.Value)
 	}
-	// Gemini Models first; its passed 5H reset reads as refreshed; stale machine ignored.
-	want := "账号 Gemini 5H 额度=100%,账号 Gemini Week 额度=68.30%,账号 Gemini 4 Argon Week 额度=83.30%"
+	// Usage totals lead; Gemini Models comes first; passed 5H reset reads as refreshed; stale machine ignored.
+	want := "Antigravity 今日 Token 用量=287400000,Antigravity 本周 Token 用量=404500000,账号 Gemini 5H 额度=100%,账号 Gemini Week 额度=68.30%,账号 Gemini 4 Argon Week 额度=83.30%"
 	if strings.Join(got, ",") != want {
 		t.Fatalf("items = %v", got)
 	}

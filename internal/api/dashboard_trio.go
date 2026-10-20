@@ -9,11 +9,8 @@ import (
 const (
 	trioCPASource         = "cpa"
 	trioAntigravitySource = "antigravity"
-	trioTokensLabel       = "今日 Tokens"
-	// Antigravity exposes quota percentages only, no token counts.
-	trioQuotaOnly       = "仅额度"
-	trioAntigravityNote = "Pro · Google 不提供 Token 用量"
-	trioNoFiveHour      = "无 5H 限额"
+	trioTokensLabel       = "今日"
+	trioNoFiveHour        = "不限"
 )
 
 // einkPlatform is one block of the trio layout: a usage summary plus the
@@ -39,29 +36,32 @@ func buildTrioPlatforms(snapshots map[string]model.SourceSnapshot, device einkDe
 	}
 
 	antigravity := snapshots[trioAntigravitySource]
+	antigravityToday := buildProductDashboard(antigravity, "antigravity", "Antigravity 今日消耗")
+	antigravityWeek := buildProductWeek(antigravity.Items, "antigravity", "Antigravity 本周用量")
 	return []einkPlatform{
 		{
 			Key:        "claude",
 			Name:       "Claude Pro",
 			Today:      trioTokenText(claudeToday),
 			TodayLabel: trioTokensLabel,
-			UsageNote:  trioWeekNote(claudeWeek.DisplayValue, device.WeekRange),
-			Rows:       claudeRows,
+			UsageNote:  trioWeekNote(claudeWeek.DisplayValue),
+			Rows:       trioCompactRows(claudeRows),
 		},
 		{
 			Key:        "codex",
 			Name:       "Codex",
 			Today:      device.Codex.DisplayValue,
 			TodayLabel: trioTokensLabel,
-			UsageNote:  trioWeekNote(device.CodexWeek.DisplayValue, device.WeekRange),
-			Rows:       device.CodexAccounts,
+			UsageNote:  trioWeekNote(device.CodexWeek.DisplayValue),
+			Rows:       trioCompactRows(device.CodexAccounts),
 		},
 		{
-			Key:       "antigravity",
-			Name:      "Antigravity",
-			Today:     trioQuotaOnly,
-			UsageNote: trioAntigravityNote,
-			Rows:      markMissingFiveHour(trioQuotaRows(antigravity, trioAntigravitySource, "Gemini")),
+			Key:        "antigravity",
+			Name:       "Antigravity",
+			Today:      trioTokenText(antigravityToday),
+			TodayLabel: trioTokensLabel,
+			UsageNote:  trioWeekNote(antigravityWeek.DisplayValue),
+			Rows:       trioCompactRows(markMissingFiveHour(trioQuotaRows(antigravity, trioAntigravitySource, "Gemini"))),
 		},
 	}
 }
@@ -93,6 +93,19 @@ func markMissingFiveHour(rows []einkQuotaRow) []einkQuotaRow {
 	return rows
 }
 
+// trioCompactRows copies rows and shortens the 5H reset to its time of day;
+// the window is at most five hours long, so the date adds nothing.
+func trioCompactRows(rows []einkQuotaRow) []einkQuotaRow {
+	result := append([]einkQuotaRow(nil), rows...)
+	for index := range result {
+		reset := result[index].FiveHour.ResetShort
+		if at := strings.LastIndex(reset, " "); at >= 0 {
+			result[index].FiveHour.ResetShort = reset[at+1:]
+		}
+	}
+	return result
+}
+
 func trioTokenText(overview sourceOverview) string {
 	if overview.Card.Value == "--" {
 		return "--"
@@ -103,8 +116,8 @@ func trioTokenText(overview sourceOverview) string {
 	return formatTokenMillions(overview.TokenValue)
 }
 
-func trioWeekNote(week, weekRange string) string {
-	return "本周 " + week + " · " + weekRange
+func trioWeekNote(week string) string {
+	return "本周 " + week
 }
 
 func trioUpdatedAt(snapshots map[string]model.SourceSnapshot, sources DashboardSources) int64 {
@@ -128,11 +141,11 @@ func mockTrioPlatforms(device einkDevicePayload) []einkPlatform {
 		return row
 	}
 	return []einkPlatform{
-		{Key: "claude", Name: "Claude Pro", Today: "12.3M", TodayLabel: trioTokensLabel, UsageNote: trioWeekNote("88.1M", device.WeekRange),
-			Rows: []einkQuotaRow{quota("cycyzg@gmail.com", 95, 83, "04/24 21:20", "04/26 15:00")}},
-		{Key: "codex", Name: "Codex", Today: device.Codex.DisplayValue, TodayLabel: trioTokensLabel, UsageNote: trioWeekNote(device.CodexWeek.DisplayValue, device.WeekRange),
-			Rows: device.CodexAccounts},
-		{Key: "antigravity", Name: "Antigravity", Today: trioQuotaOnly, UsageNote: trioAntigravityNote,
-			Rows: markMissingFiveHour([]einkQuotaRow{quota("Gemini", 99, 68, "04/24 21:31", "04/26 16:58"), quota("Gemini 4 Argon", -1, 83, "--", "04/26 11:39")})},
+		{Key: "claude", Name: "Claude Pro", Today: "12.3M", TodayLabel: trioTokensLabel, UsageNote: trioWeekNote("88.1M"),
+			Rows: trioCompactRows([]einkQuotaRow{quota("cycyzg@gmail.com", 95, 83, "04/24 21:20", "04/26 15:00")})},
+		{Key: "codex", Name: "Codex", Today: device.Codex.DisplayValue, TodayLabel: trioTokensLabel, UsageNote: trioWeekNote(device.CodexWeek.DisplayValue),
+			Rows: trioCompactRows(device.CodexAccounts)},
+		{Key: "antigravity", Name: "Antigravity", Today: "287.4M", TodayLabel: trioTokensLabel, UsageNote: trioWeekNote("404.6M"),
+			Rows: trioCompactRows(markMissingFiveHour([]einkQuotaRow{quota("Gemini", 99, 68, "04/24 21:31", "04/26 16:58"), quota("Gemini 4 Argon", -1, 83, "--", "04/26 11:39")}))},
 	}
 }
