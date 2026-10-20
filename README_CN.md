@@ -124,7 +124,7 @@ log:
 
 - Claude Pro：`collectors.cpa` 读取 CLIProxyAPI（CPA）管理接口。额度经 `POST /v0/management/api-call` 代调 Anthropic `/api/oauth/usage`；用量从 CPA 的 `usage-queue` 拉取后缓存到 sqlite，再按北京时间今日 / 周一至今汇总。该队列读后即删，只能有一个 infohub 实例开启 `CPA_ENABLED`；CPA 的 `redis-usage-queue-retention-seconds` 默认 60 秒，建议调到 3600，避免 infohub 重启期间丢记录。部署前队列里已过期的历史用量无法补回。
 - Codex：沿用 Sub2API 账号额度与 `dashboard.accounts` 白名单。
-- Antigravity：本机 `infohub-agent` 开启 `antigravity.enabled`，读取 `~/.gemini/jetski-standalone-oauth-token`，调用 Cloud Code `retrieveUserQuotaSummary`，上报名称含 `Gemini` 的分组（如 `Gemini Models`、`Gemini 4 Argon`）；服务端开启 `ANTIGRAVITY_ENABLED`。Antigravity 没有本地 Token 日志，因此今日用量显示 `--`；只有周额度的分组 5H 显示 `--`。
+- Antigravity：本机 `infohub-agent` 开启 `antigravity.enabled`，读取 `~/.gemini/jetski-standalone-oauth-token`，调用 Cloud Code `retrieveUserQuotaSummary`，上报名称含 `Gemini` 的分组（如 `Gemini Models`、`Gemini 4 Argon`）；服务端开启 `ANTIGRAVITY_ENABLED`。Antigravity 不提供 Token 用量，用量栏显示「仅额度」；只有周额度的分组（如 Pro 计划下单独计额的 `Gemini 4 Argon`）5H 栏显示「无 5H 限额」，不画进度条。
 
 旧版 `codex` 模板（只有 Codex）：上方展示今日和本周累计 Token，下方仅展示 `cycyzg@gmail.com`、`qqcyan@gmail.com` 的 5H / Week 剩余额度及重置时间，不展示告警。周用量按北京时间周一至今，通过 Sub2API `usage_stats` 的日期范围查询获取，不是滚动七天额度；查询失败显示 `--`，不影响今日用量和账号额度。账号过滤不改变上方原有的用量统计范围。
 

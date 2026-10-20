@@ -104,7 +104,7 @@ font:
     size: 54
     glyphsets: &infohub_font_glyphsets
       - GF_Latin_Kernel
-    glyphs: &infohub_font_glyphs '：刷新时间状态等待首次拉取数据解析失败请求成本启用告警总量今日合计余仅正常关注充足最佳耗尽重置暂无同步与系统概览配额显示按键周期点急低电消明细订阅度插高实检测中池夜静默省已账户可未设平台月监控剩当号个小每更知前采集登录需限流端异离线至一近供分型提模比百'
+    glyphs: &infohub_font_glyphs '：刷新时间状态等待首次拉取数据解析失败请求成本启用告警总量今日合计余仅正常关注充足最佳耗尽重置暂无同步与系统概览配额显示按键周期点急低电消明细订阅度插高实检测中池夜静默省已账户可未设平台月监控剩当号个小每更知前采集登录需限流端异离线至一近供分型提模比百不'
   - file: "gfonts://Noto+Sans+SC@700"
     id: font_header
     size: 24
@@ -1602,10 +1602,12 @@ display:
           std::string week_text = "--";
           std::string five_reset = "--";
           std::string week_reset = "--";
+          bool five_na = false;
         };
         struct TrioPlatform {
           std::string name = "--";
           std::string today = "--";
+          std::string today_label;
           std::string note = "--";
           TrioRow rows[4];
           int row_count = 0;
@@ -1623,6 +1625,7 @@ display:
             TrioPlatform &target = platforms[platform_count++];
             target.name = platform["name"] | "--";
             target.today = platform["today"] | "--";
+            target.today_label = platform["today_label"] | "";
             target.note = platform["usage_note"] | "--";
             for (JsonVariant row_value : platform["rows"].as<JsonArray>()) {
               if (target.row_count >= 4) break;
@@ -1635,6 +1638,7 @@ display:
               dest.week_percent = dest.week_text == "--" ? -1 : clamp_percent(row["week"]["percent"] | 0);
               dest.five_reset = row["five_hour"]["reset_short"] | "--";
               dest.week_reset = row["week"]["reset_short"] | "--";
+              dest.five_na = row["five_hour"]["not_applicable"] | false;
             }
           }
           return true;
@@ -1666,7 +1670,9 @@ display:
           it.printf(x, 76, id(trio_font_number), "%s", today.c_str());
           int number_w = 0, number_h = 0;
           measure_text(id(trio_font_number), today, TextAlign::TOP_LEFT, number_w, number_h);
-          it.printf(x + number_w + 6, 98, id(trio_font_xs), "今日 Tokens");
+          if (!platforms[index].today_label.empty()) {
+            it.printf(x + number_w + 6, 98, id(trio_font_xs), "%s", platforms[index].today_label.c_str());
+          }
           it.printf(x, 118, id(trio_font_xs), "%s", fit_text_width(id(trio_font_xs), platforms[index].note, max_w).c_str());
         }
         it.line(left, 142, right, 142);
@@ -1705,7 +1711,12 @@ display:
             }
             int content_y = y + (row_h - 48) / 2 + 1;
             it.printf(account_x, y + row_h / 2, id(codex_font_body), TextAlign::CENTER_LEFT, "%s", fit_text_width(id(codex_font_body), row.account, five_x - account_x - 10).c_str());
-            draw_trio_quota(five_x, content_y, row.five_text, row.five_percent, row.five_reset);
+            if (row.five_na) {
+              // Weekly-only group: no 5H window upstream, so no bar or reset.
+              it.printf(five_x, y + row_h / 2, id(codex_font_small), TextAlign::CENTER_LEFT, "%s", row.five_text.c_str());
+            } else {
+              draw_trio_quota(five_x, content_y, row.five_text, row.five_percent, row.five_reset);
+            }
             draw_trio_quota(week_x, content_y, row.week_text, row.week_percent, row.week_reset);
             y += row_h;
           }

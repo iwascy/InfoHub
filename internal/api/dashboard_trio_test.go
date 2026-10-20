@@ -50,7 +50,7 @@ func TestTrioPlatforms(t *testing.T) {
 	if codex.Today != "54.5M" || len(codex.Rows) != 2 || codex.Rows[0].FiveHour.Text != "56%" || codex.Rows[1].FiveHour.Text != "--" {
 		t.Fatalf("codex = %+v", codex)
 	}
-	if ag.Today != "--" || len(ag.Rows) != 2 || ag.Rows[0].Account != "Gemini" || ag.Rows[1].FiveHour.Text != "--" || ag.Rows[1].Week.Text != "83%" {
+	if len(ag.Rows) != 2 || ag.Rows[0].Account != "Gemini" || ag.Rows[1].FiveHour.Text != "无 5H 限额" || !ag.Rows[1].FiveHour.NotApplicable || ag.Today != "仅额度" || ag.Rows[1].Week.Text != "83%" {
 		t.Fatalf("antigravity = %+v", ag)
 	}
 }
@@ -74,7 +74,7 @@ func TestTrioIsDefaultTemplate(t *testing.T) {
 	rec := httptest.NewRecorder()
 	h.EInkDashboard(rec, httptest.NewRequest(http.MethodGet, "/dashboard/eink", nil))
 	body := rec.Body.String()
-	for _, want := range []string{"AI 额度", "Claude Pro", "pro@example.com", "Gemini 4 Argon", "12.3M", "54.5M", "仅提供额度百分比", `rowspan="2"`} {
+	for _, want := range []string{"AI 额度", "Claude Pro", "pro@example.com", "Gemini 4 Argon", "12.3M", "54.5M", "Google 不提供 Token 用量", "无 5H 限额", `rowspan="2"`} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("trio page missing %q", want)
 		}

@@ -179,8 +179,8 @@ func TestAntigravityCollectorGroups(t *testing.T) {
 	for _, item := range items {
 		got = append(got, item.Title+"="+item.Value)
 	}
-	// Gemini Models first; its 5H reset already passed so it is dropped; stale machine ignored.
-	want := "账号 Gemini Week 额度=68.30%,账号 Gemini 4 Argon Week 额度=83.30%"
+	// Gemini Models first; its passed 5H reset reads as refreshed; stale machine ignored.
+	want := "账号 Gemini 5H 额度=100%,账号 Gemini Week 额度=68.30%,账号 Gemini 4 Argon Week 额度=83.30%"
 	if strings.Join(got, ",") != want {
 		t.Fatalf("items = %v", got)
 	}

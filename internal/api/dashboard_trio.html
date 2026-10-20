@@ -34,6 +34,7 @@
   #trio .trio-track { flex: 1; max-width: 96px; height: 8px; border: 1px solid #000; padding: 1px; }
   #trio .trio-fill { display: block; height: 100%; background: #000; }
   #trio .trio-reset { font-size: 12px; }
+  #trio .trio-na { font-size: 14px; }
   #trio .trio-footer { margin-top: auto; border-top: 1px solid #000; padding-top: 6px; display: flex; justify-content: space-between; font-size: 13px; }
   @media (max-width: 560px) {
     #trio { padding: 14px; }
@@ -57,7 +58,7 @@
     {{range .Device.Platforms}}
     <div>
       <h2>{{.Name}}</h2>
-      <div class="trio-number"><strong>{{.Today}}</strong><span>今日 Tokens</span></div>
+      <div class="trio-number"><strong>{{.Today}}</strong>{{if .TodayLabel}}<span>{{.TodayLabel}}</span>{{end}}</div>
       <p class="trio-note">{{.UsageNote}}</p>
     </div>
     {{end}}
@@ -69,7 +70,7 @@
       <tr{{if eq $index 0}} class="trio-group"{{end}}>
         {{if eq $index 0}}<td class="trio-platform" rowspan="{{len $platform.Rows}}">{{$platform.Name}}</td>{{end}}
         <td class="trio-account">{{$row.Account}}</td>
-        <td><div class="trio-quota"><strong>{{$row.FiveHour.Text}}</strong><span class="trio-track" aria-hidden="true"><span class="trio-fill" style="width: {{$row.FiveHour.Percent}}%"></span></span></div><div class="trio-reset">重置 {{$row.FiveHour.ResetShort}}</div></td>
+        <td>{{if $row.FiveHour.NotApplicable}}<div class="trio-na">{{$row.FiveHour.Text}}</div>{{else}}<div class="trio-quota"><strong>{{$row.FiveHour.Text}}</strong><span class="trio-track" aria-hidden="true"><span class="trio-fill" style="width: {{$row.FiveHour.Percent}}%"></span></span></div><div class="trio-reset">重置 {{$row.FiveHour.ResetShort}}</div>{{end}}</td>
         <td><div class="trio-quota"><strong>{{$row.Week.Text}}</strong><span class="trio-track" aria-hidden="true"><span class="trio-fill" style="width: {{$row.Week.Percent}}%"></span></span></div><div class="trio-reset">重置 {{$row.Week.ResetShort}}</div></td>
       </tr>
       {{end}}{{end}}

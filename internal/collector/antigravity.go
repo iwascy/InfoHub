@@ -75,8 +75,13 @@ func (c *AntigravityCollector) Collect(ctx context.Context) ([]model.DataItem, e
 			{"5H", obs.Quota5hUsed, obs.Quota5hReset},
 			{"Week", obs.QuotaWeekUsed, obs.QuotaWeekReset},
 		} {
-			if window.used < 0 || resetPassed(window.reset, now) {
+			if window.used < 0 {
 				continue
+			}
+			if resetPassed(window.reset, now) {
+				// The window refreshed since the agent looked; keep the row
+				// instead of hiding it, the next report brings the new reset.
+				window.used, window.reset = 0, ""
 			}
 			item := sub2apiQuotaItem(c.Name(), AntigravitySourcePrefix+group, antigravityGroupLabel(group), window.name, window.used, window.reset)
 			item.Extra["product"] = "antigravity"
