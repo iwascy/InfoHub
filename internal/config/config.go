@@ -494,7 +494,7 @@ func (c *CPACollectorConfig) applyDefaults() {
 		c.DisplayName = "Claude Pro"
 	}
 	if c.QuotaIntervalSeconds == 0 {
-		c.QuotaIntervalSeconds = 120
+		c.QuotaIntervalSeconds = 300
 	}
 }
 

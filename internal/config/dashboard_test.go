@@ -24,7 +24,7 @@ func TestCPACollectorConfig(t *testing.T) {
 	cfg := Config{}
 	cfg.Collectors.CPA.Enabled = true
 	cfg.applyDefaults()
-	if cfg.Collectors.CPA.Cron != "@every 30s" || cfg.Collectors.CPA.Provider != "claude" || cfg.Collectors.CPA.QuotaIntervalSeconds != 120 {
+	if cfg.Collectors.CPA.Cron != "@every 30s" || cfg.Collectors.CPA.Provider != "claude" || cfg.Collectors.CPA.QuotaIntervalSeconds != 300 {
 		t.Fatalf("unexpected defaults: %+v", cfg.Collectors.CPA)
 	}
 	if err := cfg.validate(); err == nil {

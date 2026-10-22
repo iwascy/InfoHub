@@ -41,6 +41,7 @@ type CPACollector struct {
 
 	quotaM       sync.Mutex
 	quotaAt      time.Time
+	quotaErr     error
 	quotaItems   []model.DataItem
 	quotaAccount cpaAuthFile
 }
@@ -120,18 +121,21 @@ func (c *CPACollector) quota(ctx context.Context, now time.Time) (cpaAuthFile, [
 	c.quotaM.Lock()
 	defer c.quotaM.Unlock()
 	if !c.quotaAt.IsZero() && now.Sub(c.quotaAt) < c.cfg.QuotaInterval() {
-		return c.quotaAccount, c.quotaItems, nil
+		return c.quotaAccount, c.quotaItems, c.quotaErr
 	}
+	c.quotaAt = now
 
 	account, err := c.selectAccount(ctx)
 	if err == nil {
 		var items []model.DataItem
 		items, err = c.fetchQuota(ctx, account)
 		if err == nil {
-			c.quotaAt, c.quotaItems, c.quotaAccount = now, items, account
+			c.quotaErr = nil
+			c.quotaItems, c.quotaAccount = items, account
 			return account, items, nil
 		}
 	}
+	c.quotaErr = err
 	if c.logger != nil {
 		c.logger.Warn("cpa quota refresh failed", "error", err)
 	}

@@ -78,7 +78,7 @@ func newTestCPACollector(t *testing.T, fake *fakeCPA) (*CPACollector, *store.SQL
 	dataStore := newRemoteTestStore(t)
 	cfg := config.CPACollectorConfig{
 		BaseURL: server.URL, ManagementKey: "secret", TimeoutSeconds: 5,
-		Provider: "claude", DisplayName: "Claude Pro", QuotaIntervalSeconds: 120,
+		Provider: "claude", DisplayName: "Claude Pro", QuotaIntervalSeconds: 300,
 	}
 	return NewCPACollector(cfg, dataStore, nil), dataStore
 }
@@ -123,6 +123,21 @@ func TestCPACollectorQuotaAndUsageCache(t *testing.T) {
 			t.Fatalf("duplicate request_id counted twice: %s", item.Value)
 		}
 	}
+	// Reuse quota until five minutes have elapsed, then refresh at the boundary.
+	now = now.Add(5*time.Minute - time.Second)
+	if _, err := collector.Collect(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if fake.quotaCalls != 1 {
+		t.Fatalf("quota refreshed before five minutes: %d", fake.quotaCalls)
+	}
+	now = now.Add(time.Second)
+	if _, err := collector.Collect(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if fake.quotaCalls != 2 {
+		t.Fatalf("quota not refreshed after five minutes: %d", fake.quotaCalls)
+	}
 }
 
 func TestCPACollectorKeepsLastQuotaOnFailure(t *testing.T) {
@@ -147,6 +162,22 @@ func TestCPACollectorKeepsLastQuotaOnFailure(t *testing.T) {
 	}
 	if quotaItems != 2 || fake.quotaCalls != 2 {
 		t.Fatalf("quota items = %d, calls = %d", quotaItems, fake.quotaCalls)
+	}
+	// Failed lookups also wait five minutes before retrying.
+	now = now.Add(30 * time.Second)
+	if _, err := collector.Collect(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if fake.quotaCalls != 2 {
+		t.Fatalf("failed quota lookup retried inside interval: %d", fake.quotaCalls)
+	}
+	now = now.Add(270 * time.Second)
+	fake.quotaFail = false
+	if _, err := collector.Collect(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if fake.quotaCalls != 3 {
+		t.Fatalf("quota lookup not retried after five minutes: %d", fake.quotaCalls)
 	}
 }
 

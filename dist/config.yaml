@@ -150,7 +150,7 @@ collectors:
     provider: "claude"
     display_name: "Claude Pro"
     # account: ""               # pin one CPA credential by email
-    quota_interval_seconds: 120 # upstream /api/oauth/usage lookups
+    quota_interval_seconds: 300 # upstream /api/oauth/usage lookups (5 minutes)
 
   # Antigravity quota groups pushed by infohub-agent (antigravity.enabled).
   antigravity:
