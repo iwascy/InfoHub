@@ -8,6 +8,8 @@ import (
 
 const (
 	trioCPASource         = "cpa"
+	trioClaudeLocalSource = "claude_local"
+	trioCodexLocalSource  = "codex_local"
 	trioAntigravitySource = "antigravity"
 	trioTokensLabel       = "今日"
 	trioNoFiveHour        = "不限"
@@ -26,8 +28,9 @@ type einkPlatform struct {
 
 func buildTrioPlatforms(snapshots map[string]model.SourceSnapshot, device einkDevicePayload) []einkPlatform {
 	claude := snapshots[trioCPASource]
-	claudeToday := buildProductDashboard(claude, "claude", "Claude 今日消耗")
-	claudeWeek := buildProductWeek(claude.Items, "claude", "Claude 本周用量")
+	claudeUsage := mergeProductUsageSnapshot(claude, snapshots[trioClaudeLocalSource], "claude")
+	claudeToday := buildProductDashboard(claudeUsage, "claude", "Claude 今日消耗")
+	claudeWeek := buildProductWeek(claudeUsage.Items, "claude", "Claude 本周用量")
 	claudeRows := trioQuotaRows(claude, trioCPASource, "Claude Pro")
 	for index := range claudeRows {
 		if email := strings.TrimSpace(claudeRows[index].Email); email != "" {
@@ -124,6 +127,11 @@ func trioUpdatedAt(snapshots map[string]model.SourceSnapshot, sources DashboardS
 	selected := map[string]model.SourceSnapshot{}
 	for _, key := range []string{sources.Sub2APIKey(), trioCPASource, trioAntigravitySource} {
 		if snapshot, ok := snapshots[key]; ok && key != "" {
+			selected[key] = snapshot
+		}
+	}
+	for _, key := range []string{trioClaudeLocalSource, trioCodexLocalSource} {
+		if snapshot, ok := snapshots[key]; ok && len(snapshot.Items) > 0 {
 			selected[key] = snapshot
 		}
 	}

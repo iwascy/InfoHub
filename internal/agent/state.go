@@ -79,6 +79,22 @@ func (s *stateFile) parseStates(source string) map[string]store.LocalParseState 
 	return states
 }
 
+// parseStatesBefore 将 mtime 在 cutoff 之后的近期文件状态标记为待重置（ParserVersion = 0），
+// 既让进程启动首轮从头回填近期（本周+上周）本地 Token 用量，又通过 reset_files 清理远端旧版重复记录。
+func (s *stateFile) parseStatesBefore(source string, mtimeCutoff int64) map[string]store.LocalParseState {
+	states := s.parseStates(source)
+	if mtimeCutoff <= 0 {
+		return states
+	}
+	for path, file := range states {
+		if file.MTimeUnix == 0 || file.MTimeUnix >= mtimeCutoff {
+			file.ParserVersion = 0
+			states[path] = file
+		}
+	}
+	return states
+}
+
 func (s *stateFile) apply(source string, nextStates []store.LocalParseState) {
 	if len(nextStates) == 0 {
 		return

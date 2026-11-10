@@ -186,9 +186,13 @@ func (h *Handler) EInkDeviceData(w http.ResponseWriter, r *http.Request) {
 
 func buildEInkDashboardPage(snapshots map[string]model.SourceSnapshot, refreshSeconds int, sources DashboardSources) einkDashboardPage {
 	sub2apiKey, snapshot := configuredSnapshot(snapshots, sources.Sub2APIKey())
+	codexUsageSnapshot := snapshot
+	if sub2apiKey != "codex_local" {
+		codexUsageSnapshot = mergeProductUsageSnapshot(snapshot, snapshots["codex_local"], "codex")
+	}
 	updatedAtUnix := maxSnapshotDataUpdatedAt(selectedSnapshots(sub2apiKey, snapshot, "", model.SourceSnapshot{}))
 	deepSeekOverview := buildProductDashboard(snapshot, "deepseek", "DeepSeek 今日消耗")
-	codexOverview := buildProductDashboard(snapshot, "codex", "Codex 今日消耗")
+	codexOverview := buildProductDashboard(codexUsageSnapshot, "codex", "Codex 今日消耗")
 	_, subTable, codexCritical, codexAlerts := buildSourceDashboard(sub2apiKey, dashboardOverviewTitle(sub2apiKey), snapshot)
 	totalOverview := buildTotalOverview(deepSeekOverview, codexOverview, codexCritical)
 	alerts := mergeDashboardAlerts(codexAlerts)
@@ -214,10 +218,14 @@ func buildEInkDashboardPage(snapshots map[string]model.SourceSnapshot, refreshSe
 
 func buildEInkDevicePayload(snapshots map[string]model.SourceSnapshot, refreshSeconds int, sources DashboardSources) einkDevicePayload {
 	sub2apiKey, snapshot := configuredSnapshot(snapshots, sources.Sub2APIKey())
+	codexUsageSnapshot := snapshot
+	if sub2apiKey != "codex_local" {
+		codexUsageSnapshot = mergeProductUsageSnapshot(snapshot, snapshots["codex_local"], "codex")
+	}
 	updatedAtUnix := maxSnapshotDataUpdatedAt(selectedSnapshots(sub2apiKey, snapshot, "", model.SourceSnapshot{}))
 	deepSeekOverview := buildProductDashboard(snapshot, "deepseek", "DeepSeek 今日消耗")
 	deepSeekQuota := buildDeepSeekQuota(snapshot.Items)
-	codexOverview := buildProductDashboard(snapshot, "codex", "Codex 今日消耗")
+	codexOverview := buildProductDashboard(codexUsageSnapshot, "codex", "Codex 今日消耗")
 	quotaSource := "codex"
 	if sub2apiKey == "codex_local" {
 		quotaSource = sub2apiKey
@@ -232,11 +240,11 @@ func buildEInkDevicePayload(snapshots map[string]model.SourceSnapshot, refreshSe
 	totalRequests := int(math.Round(deepSeekOverview.Requests + codexOverview.Requests))
 	totalCost := deepSeekOverview.Cost + codexOverview.Cost
 	alerts := mergeDashboardAlerts(codexAlerts)
-	dailyRange, weekRange := dashboardUsageRanges(snapshot.Items, updatedAtUnix)
+	dailyRange, weekRange := dashboardUsageRanges(codexUsageSnapshot.Items, updatedAtUnix)
 
 	return einkDevicePayload{
 		Template:       "codex",
-		CodexWeek:      buildCodexWeek(snapshot.Items),
+		CodexWeek:      buildCodexWeek(codexUsageSnapshot.Items),
 		DailyRange:     dailyRange,
 		WeekRange:      weekRange,
 		CodexAccounts:  filterCodexAccounts(codexTable.Rows, dashboardAccounts(nil)),
@@ -515,6 +523,104 @@ func buildProductDashboard(snapshot model.SourceSnapshot, product string, title 
 		fmt.Sprintf("成本 $%.2f", overview.Cost),
 	}
 	return overview
+}
+
+// mergeProductUsageSnapshot 将本地采集器（claude_local / codex_local）的产品级今日与本周 Token 消耗合并到主快照中。
+func mergeProductUsageSnapshot(primary, local model.SourceSnapshot, product string) model.SourceSnapshot {
+	localToday, localWeek := extractProductUsageItems(local.Items, product)
+	if len(localToday) == 0 && len(localWeek) == 0 {
+		return primary
+	}
+	primaryToday, primaryWeek := extractProductUsageItems(primary.Items, product)
+
+	mergedToday := mergeCategoryUsageItems(primaryToday, localToday, false)
+	mergedWeek := mergeCategoryUsageItems(primaryWeek, localWeek, true)
+
+	items := make([]model.DataItem, 0, len(primary.Items)+len(localToday)+len(localWeek))
+	for _, item := range primary.Items {
+		if isProductUsageItem(item, product) {
+			continue
+		}
+		items = append(items, item)
+	}
+	items = append(items, mergedToday...)
+	items = append(items, mergedWeek...)
+
+	result := primary
+	result.Items = items
+	return result
+}
+
+func isProductUsageItem(item model.DataItem, product string) bool {
+	if item.Category != "token_usage_product" && item.Category != "token_usage_product_week" {
+		return false
+	}
+	return strings.EqualFold(stringExtra(item.Extra, "product"), product)
+}
+
+func extractProductUsageItems(items []model.DataItem, product string) ([]model.DataItem, []model.DataItem) {
+	var today, week []model.DataItem
+	for _, item := range items {
+		if !strings.EqualFold(stringExtra(item.Extra, "product"), product) {
+			continue
+		}
+		switch item.Category {
+		case "token_usage_product":
+			today = append(today, item)
+		case "token_usage_product_week":
+			week = append(week, item)
+		}
+	}
+	return today, week
+}
+
+func mergeCategoryUsageItems(primary, local []model.DataItem, dropInvalidPrimary bool) []model.DataItem {
+	if dropInvalidPrimary && len(local) > 0 && !hasValidUsageValue(primary) && hasValidUsageValue(local) {
+		return local
+	}
+	if len(primary) == 0 {
+		return local
+	}
+	if len(local) == 0 {
+		return primary
+	}
+	primaryDate := usageItemEndDate(primary)
+	localDate := usageItemEndDate(local)
+	if primaryDate != "" && localDate != "" && primaryDate != localDate {
+		if localDate > primaryDate {
+			return local
+		}
+		return primary
+	}
+	merged := make([]model.DataItem, 0, len(primary)+len(local))
+	merged = append(merged, primary...)
+	merged = append(merged, local...)
+	return merged
+}
+
+func usageItemEndDate(items []model.DataItem) string {
+	for _, item := range items {
+		if end := strings.TrimSpace(stringExtra(item.Extra, "end_date")); end != "" {
+			return end
+		}
+		if start := strings.TrimSpace(stringExtra(item.Extra, "start_date")); start != "" {
+			return start
+		}
+	}
+	return ""
+}
+
+func hasValidUsageValue(items []model.DataItem) bool {
+	if len(items) == 0 {
+		return false
+	}
+	for _, item := range items {
+		value, err := strconv.ParseFloat(strings.ReplaceAll(strings.TrimSpace(item.Value), ",", ""), 64)
+		if err != nil || math.IsNaN(value) || math.IsInf(value, 0) || value < 0 {
+			return false
+		}
+	}
+	return true
 }
 
 func buildDeepSeekQuota(items []model.DataItem) einkDeepSeekQuota {

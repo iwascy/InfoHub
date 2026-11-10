@@ -164,6 +164,9 @@ func (c *LocalUsageCollector) scanBuiltinIncremental(ctx context.Context) ([]loc
 
 	nextStates, records, err := c.scanner().ScanIncremental(ctx, states)
 	if err != nil {
+		if isMissingLocalPathError(err) {
+			return c.readStoredEvents()
+		}
 		return nil, err
 	}
 
@@ -174,6 +177,10 @@ func (c *LocalUsageCollector) scanBuiltinIncremental(ctx context.Context) ([]loc
 	}
 
 	return c.readStoredEvents()
+}
+
+func isMissingLocalPathError(err error) bool {
+	return err != nil && strings.HasSuffix(strings.TrimSpace(err.Error()), "path missing")
 }
 
 func (c *LocalUsageCollector) readStoredEvents() ([]localUsageEvent, error) {
@@ -190,14 +197,10 @@ func (c *LocalUsageCollector) readStoredEvents() ([]localUsageEvent, error) {
 }
 
 func (c *LocalUsageCollector) recordQueryRange() (time.Time, time.Time) {
-	windows := c.windows(c.now())
-	if len(windows) == 0 {
-		now := c.now()
-		return now, now
-	}
-	start := windows[0].Start
-	end := windows[0].End
-	for _, window := range windows[1:] {
+	now := c.now()
+	windows := c.windows(now)
+	start, end := c.productUsageRange(now)
+	for _, window := range windows {
 		if window.Start.Before(start) {
 			start = window.Start
 		}
@@ -206,6 +209,14 @@ func (c *LocalUsageCollector) recordQueryRange() (time.Time, time.Time) {
 		}
 	}
 	return start, end
+}
+
+func (c *LocalUsageCollector) productUsageRange(now time.Time) (time.Time, time.Time) {
+	local := now.In(model.ShanghaiLocation)
+	today, weekStart := model.UsageDates(local)
+	dayStart, _ := time.ParseInLocation("2006-01-02", today, model.ShanghaiLocation)
+	weekBegin, _ := time.ParseInLocation("2006-01-02", weekStart, model.ShanghaiLocation)
+	return weekBegin, dayStart.AddDate(0, 0, 1)
 }
 
 func (c *LocalUsageCollector) scanCCUsage(ctx context.Context) ([]localUsageEvent, error) {
@@ -305,8 +316,32 @@ func (c *LocalUsageCollector) buildItems(ctx context.Context, events []localUsag
 			}
 		}
 	}
+	if (!latestQuota.FiveHour.OK || !latestQuota.Week.OK) && c.store != nil {
+		if ingestStore, ok := c.store.(store.IngestStore); ok {
+			storeFetcher := NewStoreQuotaFetcher(ingestStore, c.source, c.cfg.RemoteQuotaStale())
+			storeFetcher.now = c.now
+			if storeLimits, ok, err := storeFetcher.FetchRateLimits(ctx); err == nil && ok {
+				storeLimits = discardExpiredRateLimits(storeLimits, now)
+				defaultSource := "codex_wham_usage"
+				if c.source == localClaudeSource {
+					defaultSource = "claude_oauth_usage"
+				}
+				if !latestQuota.FiveHour.OK && storeLimits.FiveHour.OK {
+					latestQuota.FiveHour = storeLimits.FiveHour
+					quotaSourceForWindow["5H"] = defaultSource
+				}
+				if !latestQuota.Week.OK && storeLimits.Week.OK {
+					latestQuota.Week = storeLimits.Week
+					quotaSourceForWindow["Week"] = defaultSource
+				}
+				if c.source == localCodexSource && (latestQuota.FiveHour.OK || latestQuota.Week.OK) {
+					onlineQuotaStatus = codexOnlineQuotaStatusOK
+				}
+			}
+		}
+	}
 
-	items := make([]model.DataItem, 0, 8)
+	items := make([]model.DataItem, 0, 10)
 	today := buckets["today"]
 	if today == nil {
 		today = newLocalUsageBucket()
@@ -333,6 +368,7 @@ func (c *LocalUsageCollector) buildItems(ctx context.Context, events []localUsag
 			"cost_estimated":        true,
 		},
 	})
+	items = append(items, c.productUsageItems(now, events)...)
 
 	for _, window := range windows {
 		bucket := buckets[window.Key]
@@ -506,6 +542,65 @@ func (c *LocalUsageCollector) windows(now time.Time) []localWindow {
 		{Key: "today", Label: "Today", Title: "今日用量", Start: todayStart, End: todayStart.AddDate(0, 0, 1), QuotaUnit: "tokens"},
 		{Key: "weekly", Label: "Week", Title: "7D 用量", Start: now.AddDate(0, 0, -7), End: now, QuotaCap: weeklyCap, QuotaUnit: "messages"},
 	}
+}
+
+func (c *LocalUsageCollector) productUsageItems(now time.Time, events []localUsageEvent) []model.DataItem {
+	local := now.In(model.ShanghaiLocation)
+	today, weekStart := model.UsageDates(local)
+	dayStart, _ := time.ParseInLocation("2006-01-02", today, model.ShanghaiLocation)
+	dayEnd := dayStart.AddDate(0, 0, 1)
+	weekBegin, _ := time.ParseInLocation("2006-01-02", weekStart, model.ShanghaiLocation)
+
+	dayBucket := newLocalUsageBucket()
+	var weekTokens float64
+	for _, event := range events {
+		if event.At.Before(weekBegin) || !event.At.Before(dayEnd) {
+			continue
+		}
+		weekTokens += event.TotalTokens()
+		if !event.At.Before(dayStart) {
+			dayBucket.add(event)
+		}
+	}
+	dayCost := dayBucket.costSummary(c.source)
+	product := c.productKey()
+	display := c.displayName()
+	return []model.DataItem{
+		{
+			Source:   c.source,
+			Category: "token_usage_product",
+			Title:    display + " 今日 Token 用量",
+			Value:    formatFloat(dayBucket.TotalTokens()),
+			Extra: map[string]any{
+				"scope":          "product",
+				"product":        product,
+				"daily_requests": dayBucket.Messages,
+				"daily_cost":     dayCost.TotalCost,
+				"start_date":     today,
+				"end_date":       today,
+				"timezone":       "Asia/Shanghai",
+			},
+		},
+		{
+			Source:   c.source,
+			Category: "token_usage_product_week",
+			Title:    display + " 本周 Token 用量",
+			Value:    formatFloat(weekTokens),
+			Extra: map[string]any{
+				"product":    product,
+				"start_date": weekStart,
+				"end_date":   today,
+				"timezone":   "Asia/Shanghai",
+			},
+		},
+	}
+}
+
+func (c *LocalUsageCollector) productKey() string {
+	if c.source == localCodexSource {
+		return "codex"
+	}
+	return "claude"
 }
 
 func (c *LocalUsageCollector) displayName() string {

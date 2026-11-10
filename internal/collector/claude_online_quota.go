@@ -331,11 +331,13 @@ func extractClaudeOnlineRateLimit(payload map[string]any, key string) localQuota
 	if !ok {
 		return localQuotaObservation{}
 	}
-	remaining, ok := floatValue(record["utilization"])
+	// Anthropic OAuth usage 接口返回的 utilization 为已使用百分比（0~100），
+	// 下游 quotaItem 会统一计算 remainingPercent(usedPercent)。
+	used, ok := floatValue(record["utilization"])
 	if !ok {
 		return localQuotaObservation{}
 	}
-	observation := localQuotaObservation{OK: true, UsedPercent: remainingPercent(remaining)}
+	observation := localQuotaObservation{OK: true, UsedPercent: used}
 	if reset, ok := parseEventTime(record["resets_at"]); ok {
 		observation.ResetAt = reset.Format(time.RFC3339)
 	}

@@ -9,6 +9,7 @@ import (
 
 	"infohub/internal/collector"
 	"infohub/internal/localscan"
+	"infohub/internal/model"
 	"infohub/internal/store"
 )
 
@@ -32,6 +33,7 @@ type Runner struct {
 	client        *Client
 	quotaFetchers map[string]quotaFetcher
 	antigravity   groupFetcher
+	bootstrapped  map[string]bool
 	now           func() time.Time
 }
 
@@ -41,6 +43,7 @@ func NewRunner(cfg Config, version string, logger *slog.Logger) *Runner {
 		logger:        logger,
 		client:        NewClient(cfg.Server, cfg.MachineID, version),
 		quotaFetchers: map[string]quotaFetcher{},
+		bootstrapped:  map[string]bool{},
 		now:           time.Now,
 	}
 	if cfg.ClaudeQuota.Enabled {
@@ -106,8 +109,13 @@ func (r *Runner) runSource(ctx context.Context, state *stateFile, source string,
 		Now:    r.now,
 	}
 
+	parseStates := state.parseStates(source)
+	if !r.bootstrapped[source] {
+		parseStates = state.parseStatesBefore(source, recentSyncCutoff(r.now()).Unix())
+	}
+
 	scanStart := time.Now()
-	nextStates, records, err := scanner.ScanIncremental(ctx, state.parseStates(source))
+	nextStates, records, err := scanner.ScanIncremental(ctx, parseStates)
 	if err != nil {
 		return err
 	}
@@ -132,6 +140,7 @@ func (r *Runner) runSource(ctx context.Context, state *stateFile, source string,
 	)
 
 	if len(records) == 0 && len(resetFiles) == 0 && quota == nil {
+		r.markBootstrapped(source)
 		r.logger.Debug("agent source up to date", "source", source)
 		return nil
 	}
@@ -158,6 +167,7 @@ func (r *Runner) runSource(ctx context.Context, state *stateFile, source string,
 	}
 
 	state.apply(source, nextStates)
+	r.markBootstrapped(source)
 	r.logger.Info("agent push complete",
 		"source", source,
 		"records", len(records),
@@ -166,6 +176,23 @@ func (r *Runner) runSource(ctx context.Context, state *stateFile, source string,
 		"push_duration", time.Since(pushStart),
 	)
 	return nil
+}
+
+func (r *Runner) markBootstrapped(source string) {
+	if r.bootstrapped == nil {
+		r.bootstrapped = map[string]bool{}
+	}
+	r.bootstrapped[source] = true
+}
+
+func recentSyncCutoff(now time.Time) time.Time {
+	local := now.In(model.ShanghaiLocation)
+	_, weekStart := model.UsageDates(local)
+	weekBegin, err := time.ParseInLocation("2006-01-02", weekStart, model.ShanghaiLocation)
+	if err != nil {
+		return now.AddDate(0, 0, -14)
+	}
+	return weekBegin.AddDate(0, 0, -7)
 }
 
 // runAntigravity reports quota groups and optional local token usage read via

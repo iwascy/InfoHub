@@ -252,3 +252,46 @@ func TestChunkRecords(t *testing.T) {
 		t.Fatal("expected nil chunks for empty input")
 	}
 }
+
+func TestRunnerBootstrapsRecentFilesOnNewProcessStartup(t *testing.T) {
+	server := &fakeIngestServer{}
+	httpServer := httptest.NewServer(server.handler())
+	defer httpServer.Close()
+
+	claudeDir := t.TempDir()
+	sessionPath := filepath.Join(claudeDir, "session.jsonl")
+	writeClaudeJSONL(t, sessionPath, 2)
+
+	runner1 := newTestRunner(t, httpServer.URL, claudeDir)
+	if err := runner1.RunOnce(context.Background()); err != nil {
+		t.Fatalf("runner1 RunOnce: %v", err)
+	}
+	if server.pushCount() != 1 || len(server.push(0).Body.Records) != 2 {
+		t.Fatalf("unexpected runner1 pushes: %d", server.pushCount())
+	}
+
+	// Simulate a restarted agent process sharing the same state.json: the first
+	// run backfills recent files once so a redeployed server has full week data.
+	runner2 := &Runner{
+		cfg:           runner1.cfg,
+		logger:        runner1.logger,
+		client:        runner1.client,
+		quotaFetchers: map[string]quotaFetcher{},
+		bootstrapped:  map[string]bool{},
+		now:           runner1.now,
+	}
+	if err := runner2.RunOnce(context.Background()); err != nil {
+		t.Fatalf("runner2 first RunOnce: %v", err)
+	}
+	if server.pushCount() != 2 || len(server.push(1).Body.Records) != 2 || len(server.push(1).Body.ResetFiles) != 1 {
+		t.Fatalf("expected bootstrap backfill push of 2 records with reset_files, got count=%d resets=%v", server.pushCount(), server.push(1).Body.ResetFiles)
+	}
+
+	// Subsequent runs on the same process remain incremental.
+	if err := runner2.RunOnce(context.Background()); err != nil {
+		t.Fatalf("runner2 second RunOnce: %v", err)
+	}
+	if server.pushCount() != 2 {
+		t.Fatalf("expected no push on second cycle of runner2, got %d", server.pushCount())
+	}
+}

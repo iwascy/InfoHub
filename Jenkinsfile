@@ -151,10 +151,14 @@ archive_path="$4"
 release_root="${deploy_base}/releases/${release_id}"
 app_dir="${release_root}/app"
 
-mkdir -p "${app_dir}"
+mkdir -p "${app_dir}" "${deploy_base}/data"
 tar -xzf "${archive_path}" -C "${app_dir}"
 cp "${deploy_base}/current/.env" "${app_dir}/.env"
-chown -R infohub:infohub "${release_root}"
+if [ -d "${deploy_base}/current/data" ] && [ ! -L "${deploy_base}/current/data" ]; then
+  cp -a "${deploy_base}/current/data/." "${deploy_base}/data/" || true
+fi
+ln -sfn "${deploy_base}/data" "${app_dir}/data"
+chown -R infohub:infohub "${deploy_base}/data" "${release_root}"
 ln -sfn "${app_dir}" "${deploy_base}/current"
 systemctl restart "${service_name}"
 systemctl is-active "${service_name}"

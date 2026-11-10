@@ -224,6 +224,7 @@ func (s *Scanner) parseJSONL(path string) ([]Event, error) {
 
 	var events []Event
 	lastModel := ""
+	seenKeys := map[string]struct{}{}
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" {
@@ -240,6 +241,9 @@ func (s *Scanner) parseJSONL(path string) ([]Event, error) {
 		lastModel = s.inheritModel(payload, lastModel)
 		event, ok := ExtractEvent(s.Source, payload)
 		if ok {
+			if s.shouldSkipDuplicate(payload, seenKeys) {
+				continue
+			}
 			if strings.TrimSpace(event.Model) == "" {
 				event.Model = lastModel
 			}
@@ -269,6 +273,7 @@ func (s *Scanner) parseJSONLRecords(path string, offset int64) ([]store.LocalUsa
 	currentOffset := offset
 	var records []store.LocalUsageRecord
 	lastModel := ""
+	seenKeys := map[string]struct{}{}
 	for {
 		lineOffset := currentOffset
 		line, err := reader.ReadString('\n')
@@ -279,7 +284,7 @@ func (s *Scanner) parseJSONLRecords(path string, offset int64) ([]store.LocalUsa
 			decoder.UseNumber()
 			if err := decoder.Decode(&payload); err == nil {
 				lastModel = s.inheritModel(payload, lastModel)
-				if event, ok := ExtractEvent(s.Source, payload); ok {
+				if event, ok := ExtractEvent(s.Source, payload); ok && !s.shouldSkipDuplicate(payload, seenKeys) {
 					if strings.TrimSpace(event.Model) == "" {
 						event.Model = lastModel
 					}
@@ -316,4 +321,19 @@ func (s *Scanner) inheritModel(payload any, current string) string {
 		return current
 	}
 	return model
+}
+
+func (s *Scanner) shouldSkipDuplicate(payload any, seen map[string]struct{}) bool {
+	if s.Source != SourceClaude {
+		return false
+	}
+	key := ClaudeEventDedupeKey(payload)
+	if key == "" {
+		return false
+	}
+	if _, exists := seen[key]; exists {
+		return true
+	}
+	seen[key] = struct{}{}
+	return false
 }

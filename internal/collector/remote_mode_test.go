@@ -142,3 +142,57 @@ func TestRemoteModeUsesAgentQuotaObservation(t *testing.T) {
 		t.Fatalf("approx = %v", got)
 	}
 }
+
+func TestBuiltinModeWithStoreFallsBackToIngestedRecordsAndEmitsProductUsage(t *testing.T) {
+	dataStore := newRemoteTestStore(t)
+	now := time.Date(2026, 4, 24, 12, 0, 0, 0, time.UTC)
+
+	if err := dataStore.SaveIngestedUsage("mbp", "claude_local", nil, []store.LocalUsageRecord{
+		{FilePath: "/mbp/week.jsonl", ByteOffset: 0, At: time.Date(2026, 4, 21, 8, 0, 0, 0, time.UTC), Model: "claude-sonnet-4-6", Input: 2000000, Output: 500000, Quota5hUsed: -1, QuotaWeekUsed: -1},
+		{FilePath: "/mbp/today.jsonl", ByteOffset: 0, At: now.Add(-time.Hour), Model: "claude-sonnet-4-6", Input: 1000000, Output: 200000, Quota5hUsed: -1, QuotaWeekUsed: -1},
+	}); err != nil {
+		t.Fatalf("SaveIngestedUsage claude_local: %v", err)
+	}
+	if err := dataStore.SaveIngestedUsage("mbp", "codex_local", nil, []store.LocalUsageRecord{
+		{FilePath: "/mbp/codex-week.jsonl", ByteOffset: 0, At: time.Date(2026, 4, 22, 8, 0, 0, 0, time.UTC), Model: "gpt-5-codex", Input: 3000000, Output: 1000000, Quota5hUsed: -1, QuotaWeekUsed: -1},
+		{FilePath: "/mbp/codex-today.jsonl", ByteOffset: 0, At: now.Add(-time.Hour), Model: "gpt-5-codex", Input: 500000, Output: 100000, Quota5hUsed: -1, QuotaWeekUsed: -1},
+	}); err != nil {
+		t.Fatalf("SaveIngestedUsage codex_local: %v", err)
+	}
+
+	claudeCollector := NewClaudeLocalCollector(config.LocalCollectorConfig{
+		Mode:  "builtin",
+		Paths: []string{filepath.Join(t.TempDir(), "missing-claude")},
+	}, nil)
+	claudeCollector.now = func() time.Time { return now }
+	claudeCollector.SetStore(dataStore)
+
+	claudeItems, err := claudeCollector.Collect(context.Background())
+	if err != nil {
+		t.Fatalf("claude collect failed: %v", err)
+	}
+	if got := mustFindItem(t, claudeItems, "Claude Local 今日 Token 用量").Value; got != "1200000" {
+		t.Fatalf("claude today product usage = %s, want 1200000", got)
+	}
+	if got := mustFindItem(t, claudeItems, "Claude Local 本周 Token 用量").Value; got != "3700000" {
+		t.Fatalf("claude week product usage = %s, want 3700000", got)
+	}
+
+	codexCollector := NewCodexLocalCollector(config.LocalCollectorConfig{
+		Mode:  "builtin",
+		Paths: []string{filepath.Join(t.TempDir(), "missing-codex")},
+	}, nil)
+	codexCollector.now = func() time.Time { return now }
+	codexCollector.SetStore(dataStore)
+
+	codexItems, err := codexCollector.Collect(context.Background())
+	if err != nil {
+		t.Fatalf("codex collect failed: %v", err)
+	}
+	if got := mustFindItem(t, codexItems, "Codex Local 今日 Token 用量").Value; got != "600000" {
+		t.Fatalf("codex today product usage = %s, want 600000", got)
+	}
+	if got := mustFindItem(t, codexItems, "Codex Local 本周 Token 用量").Value; got != "4600000" {
+		t.Fatalf("codex week product usage = %s, want 4600000", got)
+	}
+}

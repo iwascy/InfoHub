@@ -29,6 +29,11 @@ func extractClaudeEvent(payload any) (Event, bool) {
 	if eventType != "" && eventType != "assistant" && eventType != "user" {
 		return Event{}, false
 	}
+	// Claude Code 将单次 API 响应的多个内容块拆成多行写入 JSONL，且每行都携带完整 message.usage；
+	// 仅保留首个内容块（apiBlockIndex == 0 或未设置），避免同一请求重复累计 token。
+	if blockIndex, ok := FloatValue(record["apiBlockIndex"]); ok && blockIndex > 0 {
+		return Event{}, false
+	}
 
 	usage, ok := NestedMap(record, "message.usage")
 	if !ok {
@@ -51,6 +56,15 @@ func extractClaudeEvent(payload any) (Event, bool) {
 	}, true
 }
 
+// ClaudeEventDedupeKey 提取 Claude Code 响应的唯一消息标识，用于同文件多内容块行的兜底去重。
+func ClaudeEventDedupeKey(payload any) string {
+	record, ok := payload.(map[string]any)
+	if !ok {
+		return ""
+	}
+	return FirstNestedString(record, "message.id", "requestId", "requestRef")
+}
+
 func extractCodexEvent(payload any) (Event, bool) {
 	record, ok := payload.(map[string]any)
 	if !ok {
@@ -59,6 +73,11 @@ func extractCodexEvent(payload any) (Event, bool) {
 
 	if event, ok := extractCodexTokenCountEvent(record); ok {
 		return event, true
+	}
+	// Codex CLI 每次模型回复会同时写入 token_usage_record 与 event_msg(token_count)，
+	// 后者包含相同的本次 token 明细及最新 rate_limits，跳过前者以避免双倍统计。
+	if strings.TrimSpace(Stringify(record["type"])) == "token_usage_record" {
+		return Event{}, false
 	}
 
 	usage, ok := FirstNestedMap(record,

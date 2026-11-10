@@ -54,6 +54,11 @@ func PrintLocalUsage(ctx context.Context, cfg Config, logger *slog.Logger, w io.
 		}
 		results[source] = items
 	}
+	if cfg.Antigravity.Enabled {
+		if items := collectLocalAntigravityItems(ctx, cfg.Antigravity); len(items) > 0 {
+			results[antigravitySource] = items
+		}
+	}
 
 	if len(results) == 0 {
 		return fmt.Errorf("no local usage data found (check sources.*.paths)")
@@ -65,7 +70,7 @@ func PrintLocalUsage(ctx context.Context, cfg Config, logger *slog.Logger, w io.
 		return encoder.Encode(results)
 	}
 
-	for _, source := range []string{"claude_local", "codex_local"} {
+	for _, source := range []string{"claude_local", "codex_local", antigravitySource} {
 		items, ok := results[source]
 		if !ok {
 			continue
@@ -75,10 +80,70 @@ func PrintLocalUsage(ctx context.Context, cfg Config, logger *slog.Logger, w io.
 	return nil
 }
 
+func collectLocalAntigravityItems(ctx context.Context, cfg AntigravityConfig) []model.DataItem {
+	client := NewAntigravityQuotaClient(cfg)
+	now := time.Now()
+	fetchedAt := now.Unix()
+	var items []model.DataItem
+
+	if records, err := client.FetchUsageRecords(ctx); err == nil && len(records) > 0 {
+		local := now.In(model.ShanghaiLocation)
+		today, weekStart := model.UsageDates(local)
+		dayStart, _ := time.ParseInLocation("2006-01-02", today, model.ShanghaiLocation)
+		weekBegin, _ := time.ParseInLocation("2006-01-02", weekStart, model.ShanghaiLocation)
+		var dayTokens, weekTokens float64
+		for _, record := range records {
+			if record.At.Before(weekBegin) {
+				continue
+			}
+			weekTokens += record.Total
+			if !record.At.Before(dayStart) {
+				dayTokens += record.Total
+			}
+		}
+		items = append(items,
+			model.DataItem{
+				Source: antigravitySource, Category: "token_usage_product", Title: "Antigravity 今日 Token 用量",
+				Value: strconv.FormatFloat(dayTokens, 'f', -1, 64), FetchedAt: fetchedAt,
+				Extra: map[string]any{"scope": "product", "product": "antigravity", "start_date": today, "end_date": today, "timezone": "Asia/Shanghai"},
+			},
+			model.DataItem{
+				Source: antigravitySource, Category: "token_usage_product_week", Title: "Antigravity 本周 Token 用量",
+				Value: strconv.FormatFloat(weekTokens, 'f', -1, 64), FetchedAt: fetchedAt,
+				Extra: map[string]any{"product": "antigravity", "start_date": weekStart, "end_date": today, "timezone": "Asia/Shanghai"},
+			},
+		)
+	}
+	if groups, err := client.FetchGroups(ctx); err == nil {
+		for _, group := range groups {
+			if group.FiveHour.OK {
+				rem := max(0.0, 100.0-group.FiveHour.UsedPercent)
+				items = append(items, model.DataItem{
+					Source: antigravitySource, Category: "quota", Title: fmt.Sprintf("账号 %s 5H 额度", group.Name),
+					Value: fmt.Sprintf("%.0f%%", rem), FetchedAt: fetchedAt,
+					Extra: map[string]any{"window": "5H", "used_percent": group.FiveHour.UsedPercent, "remaining_percent": rem, "reset_at": group.FiveHour.ResetAt, "quota_source": "agent_quota_summary"},
+				})
+			}
+			if group.Week.OK {
+				rem := max(0.0, 100.0-group.Week.UsedPercent)
+				items = append(items, model.DataItem{
+					Source: antigravitySource, Category: "quota", Title: fmt.Sprintf("账号 %s Week 额度", group.Name),
+					Value: fmt.Sprintf("%.0f%%", rem), FetchedAt: fetchedAt,
+					Extra: map[string]any{"window": "Week", "used_percent": group.Week.UsedPercent, "remaining_percent": rem, "reset_at": group.Week.ResetAt, "quota_source": "agent_quota_summary"},
+				})
+			}
+		}
+	}
+	return items
+}
+
 func printSourceItems(w io.Writer, source string, items []model.DataItem) {
 	title := "Claude Local"
-	if source == "codex_local" {
+	switch source {
+	case "codex_local":
 		title = "Codex Local"
+	case antigravitySource:
+		title = "Antigravity"
 	}
 	fmt.Fprintf(w, "%s (%s)\n", title, source)
 
@@ -93,6 +158,10 @@ func printSourceItems(w io.Writer, source string, items []model.DataItem) {
 				formatExtraNumber(item.Extra["cache_creation"]),
 				formatExtraNumber(item.Extra["reasoning"]),
 			)
+		case item.Category == "token_usage_product" && source == antigravitySource:
+			fmt.Fprintf(w, "  今日 Token 用量: %s\n", groupDigits(item.Value))
+		case item.Category == "token_usage_product_week":
+			fmt.Fprintf(w, "  本周 Token 用量: %s  (%s ~ %s)\n", groupDigits(item.Value), formatExtraNumber(item.Extra["start_date"]), formatExtraNumber(item.Extra["end_date"]))
 		case item.Category == "quota" && hasWindowLabel(item.Extra):
 			window, _ := item.Extra["window"].(string)
 			line := fmt.Sprintf("  %s 额度剩余: %s", window, item.Value)

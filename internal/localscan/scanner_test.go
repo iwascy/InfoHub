@@ -241,6 +241,157 @@ func TestCodexScannerInheritsModelAndSplitsCachedInput(t *testing.T) {
 	}
 }
 
+func TestClaudeScannerDeduplicatesMultiBlockResponses(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session.jsonl")
+	lines := []map[string]any{
+		{
+			"type":          "assistant",
+			"timestamp":     "2026-04-26T10:00:00Z",
+			"apiBlockIndex": 0,
+			"requestRef":    "req_01",
+			"message": map[string]any{
+				"id":    "msg_01",
+				"model": "claude-opus-4-7",
+				"usage": map[string]any{
+					"input_tokens":                10,
+					"output_tokens":               200,
+					"cache_read_input_tokens":     50000,
+					"cache_creation_input_tokens": 1000,
+				},
+			},
+		},
+		{
+			"type":          "assistant",
+			"timestamp":     "2026-04-26T10:00:01Z",
+			"apiBlockIndex": 1,
+			"requestRef":    "req_01",
+			"message": map[string]any{
+				"id":    "msg_01",
+				"model": "claude-opus-4-7",
+				"usage": map[string]any{
+					"input_tokens":                10,
+					"output_tokens":               200,
+					"cache_read_input_tokens":     50000,
+					"cache_creation_input_tokens": 1000,
+				},
+			},
+		},
+		{
+			"type":       "assistant",
+			"timestamp":  "2026-04-26T10:00:02Z",
+			"requestRef": "req_01",
+			"message": map[string]any{
+				"id":    "msg_01",
+				"model": "claude-opus-4-7",
+				"usage": map[string]any{
+					"input_tokens":                10,
+					"output_tokens":               200,
+					"cache_read_input_tokens":     50000,
+					"cache_creation_input_tokens": 1000,
+				},
+			},
+		},
+	}
+	var raw []byte
+	for _, line := range lines {
+		payload, err := json.Marshal(line)
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		raw = append(raw, payload...)
+		raw = append(raw, '\n')
+	}
+	if err := os.WriteFile(path, raw, 0o644); err != nil {
+		t.Fatalf("write jsonl: %v", err)
+	}
+
+	scanner := &Scanner{Source: SourceClaude, Paths: []string{dir}}
+	events, err := scanner.ScanFull(context.Background())
+	if err != nil {
+		t.Fatalf("ScanFull: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("expected 1 deduplicated claude event, got %d", len(events))
+	}
+	if events[0].TotalTokens() != 51210 {
+		t.Fatalf("unexpected total tokens: %v", events[0].TotalTokens())
+	}
+
+	_, records, err := scanner.ScanIncremental(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("ScanIncremental: %v", err)
+	}
+	if len(records) != 1 {
+		t.Fatalf("expected 1 deduplicated incremental record, got %d", len(records))
+	}
+}
+
+func TestCodexScannerSkipsDuplicateTokenUsageRecord(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "rollout-dup.jsonl")
+	lines := []map[string]any{
+		{
+			"timestamp": "2026-04-26T10:00:00Z",
+			"type":      "turn_context",
+			"payload": map[string]any{
+				"model": "gpt-5.4",
+			},
+		},
+		{
+			"timestamp": "2026-04-26T10:01:00Z",
+			"type":      "token_usage_record",
+			"payload": map[string]any{
+				"usage": map[string]any{
+					"input_tokens":        1000,
+					"cached_input_tokens": 750,
+					"output_tokens":       20,
+					"total_tokens":        1020,
+				},
+			},
+		},
+		{
+			"timestamp": "2026-04-26T10:01:00Z",
+			"type":      "event_msg",
+			"payload": map[string]any{
+				"type": "token_count",
+				"info": map[string]any{
+					"last_token_usage": map[string]any{
+						"input_tokens":        1000,
+						"cached_input_tokens": 750,
+						"output_tokens":       20,
+						"total_tokens":        1020,
+					},
+				},
+			},
+		},
+	}
+	var raw []byte
+	for _, line := range lines {
+		payload, err := json.Marshal(line)
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		raw = append(raw, payload...)
+		raw = append(raw, '\n')
+	}
+	if err := os.WriteFile(path, raw, 0o644); err != nil {
+		t.Fatalf("write jsonl: %v", err)
+	}
+
+	scanner := &Scanner{Source: SourceCodex, Paths: []string{dir}}
+	events, err := scanner.ScanFull(context.Background())
+	if err != nil {
+		t.Fatalf("ScanFull: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("expected 1 deduplicated codex event, got %d", len(events))
+	}
+	if events[0].TotalTokens() != 1020 {
+		t.Fatalf("unexpected total tokens: %v", events[0].TotalTokens())
+	}
+}
+
 // normalizeJSON round-trips through encoding/json so numbers arrive as
 // json.Number, matching what the scanner's decoder produces.
 func normalizeJSON(t *testing.T, value any) any {
