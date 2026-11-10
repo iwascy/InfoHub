@@ -31,7 +31,7 @@ func buildTrioPlatforms(snapshots map[string]model.SourceSnapshot, device einkDe
 	claudeUsage := mergeProductUsageSnapshot(claude, snapshots[trioClaudeLocalSource], "claude")
 	claudeToday := buildProductDashboard(claudeUsage, "claude", "Claude 今日消耗")
 	claudeWeek := buildProductWeek(claudeUsage.Items, "claude", "Claude 本周用量")
-	claudeRows := trioQuotaRows(claude, trioCPASource, "Claude Pro")
+	claudeRows := buildClaudeTrioRows(snapshots[trioCPASource], snapshots[trioClaudeLocalSource])
 	for index := range claudeRows {
 		if email := strings.TrimSpace(claudeRows[index].Email); email != "" {
 			claudeRows[index].Account = email
@@ -67,6 +67,30 @@ func buildTrioPlatforms(snapshots map[string]model.SourceSnapshot, device einkDe
 			Rows:       trioCompactRows(markMissingFiveHour(trioQuotaRows(antigravity, trioAntigravitySource, "Gemini"))),
 		},
 	}
+}
+
+// buildClaudeTrioRows 合并 CPA 与本机 Claude Code（claude_local）的配额行；
+// 若无在线额度，则保留占位行以保持面板布局。
+func buildClaudeTrioRows(cpaSnapshot, localSnapshot model.SourceSnapshot) []einkQuotaRow {
+	var rows []einkQuotaRow
+	cpaAccounts, _, _ := buildQuotaAccounts(cpaSnapshot.Items, trioCPASource)
+	for _, acc := range cpaAccounts {
+		rows = append(rows, buildQuotaRow(acc))
+	}
+	localAccounts, _, _ := buildQuotaAccounts(localSnapshot.Items, trioClaudeLocalSource)
+	for _, acc := range localAccounts {
+		row := buildQuotaRow(acc)
+		if row.Account == "Claude Local" {
+			row.Account = "Claude Code"
+		}
+		rows = append(rows, row)
+	}
+	if len(rows) == 0 {
+		row := emptyQuotaRow()
+		row.Account = "Claude Pro"
+		rows = append(rows, row)
+	}
+	return rows
 }
 
 // trioQuotaRows returns the snapshot's quota rows, or one unknown row named

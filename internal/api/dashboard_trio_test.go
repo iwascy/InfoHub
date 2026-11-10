@@ -140,6 +140,8 @@ func TestTrioIncludesLocalClaudeAndCodexUsage(t *testing.T) {
 	snapshots["claude_local"] = model.SourceSnapshot{Items: []model.DataItem{
 		{Category: "token_usage_product", Value: "5600000", Extra: map[string]any{"product": "claude", "start_date": "2026-04-24", "end_date": "2026-04-24"}},
 		{Category: "token_usage_product_week", Value: "136100000", Extra: map[string]any{"product": "claude", "start_date": "2026-04-20", "end_date": "2026-04-24"}},
+		{Category: "quota", Title: "账号 Claude Local 5H 额度", Extra: map[string]any{"window": "5H", "remaining_percent": 88, "quota_source": "claude_oauth_usage", "account_id": "claude_local", "reset_at": "2026-04-24T18:00:00+08:00"}},
+		{Category: "quota", Title: "账号 Claude Local Week 额度", Extra: map[string]any{"window": "Week", "remaining_percent": 91, "quota_source": "claude_oauth_usage", "account_id": "claude_local", "reset_at": "2026-04-28T00:00:00+08:00"}},
 	}}
 	snapshots["codex_local"] = model.SourceSnapshot{Items: []model.DataItem{
 		{Category: "token_usage_product", Value: "33400000", Extra: map[string]any{"product": "codex", "start_date": "2026-04-24", "end_date": "2026-04-24"}},
@@ -150,6 +152,9 @@ func TestTrioIncludesLocalClaudeAndCodexUsage(t *testing.T) {
 	platforms := buildTrioPlatforms(snapshots, page.Device)
 	if platforms[0].Today != "5.6M" || platforms[0].UsageNote != "本周 136.1M" {
 		t.Fatalf("claude with local usage = %+v", platforms[0])
+	}
+	if len(platforms[0].Rows) != 1 || platforms[0].Rows[0].Account != "Claude Code" || platforms[0].Rows[0].FiveHour.Text != "88%" || platforms[0].Rows[0].Week.Text != "91%" {
+		t.Fatalf("claude with local quota rows = %+v", platforms[0].Rows)
 	}
 	if platforms[1].Today != "87.9M" || platforms[1].UsageNote != "本周 86.5M" {
 		t.Fatalf("codex with local usage = %+v", platforms[1])
